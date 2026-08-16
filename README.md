@@ -1,0 +1,103 @@
+<div align="center">
+  <p>
+    <img src="assets/readme/banner.png" alt="Image2PPT：从幻灯片图片到对象级可编辑 PowerPoint" width="100%">
+  </p>
+  <p>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-2ea44f"></a>
+    <a href="#安装与配置"><img alt="Install" src="https://img.shields.io/badge/install-Claude%20Code%20%7C%20Codex-8b5cf6"></a>
+    <a href="README_EN.md"><img alt="Language" src="https://img.shields.io/badge/language-中文%20%7C%20English-1f6feb"></a>
+  </p>
+</div>
+
+# Image2PPT
+
+🧩 Image2PPT 专注把**复杂商业 PPT 和科研流程图**高保真重建为对象级可编辑 PowerPoint，在密集布局、复合图形和细小关系上兼顾清晰度与细节还原。
+
+## 能力与案例
+
+简单页面的图片转 PPT 已经不难，真正拉开差距的是复杂页面：元素数量多、层级关系密、局部图标小，任何节点、箭头或间距偏差都会破坏原图表达。Image2PPT 重点解决这类高难度还原：
+
+- 🏢 **复杂商业 PPT**：还原密集时间线、多层流程、卡片、图标和复合箭头，同时保持版式与对象可编辑。
+- 🔬 **复杂科研流程图**：逐节点、逐关系重建知识图谱和科研框架，保留圆形节点、连接线、箭头及局部结构。
+- ✏️ **对象级可编辑**：文字、形状、节点、连接线和箭头均可独立选择，不使用整页截图充当伪可编辑底图。
+- ✅ **双重质量优势**：在下方展示的同源案例对比中，Image2PPT 的清晰度表现最佳，细节还原度最高。
+
+下面第一行展示复杂商业 PPT，第二行展示复杂科研图；两组“原图 / 转换图”组成 2×2 对照。转换图中的选框用于证明对象可以独立编辑，不会出现在放映模式中。
+
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>商业 PPT · 原图</strong><br><img src="assets/readme/business-source.png" alt="商业 PPT 原图" width="100%"></td>
+    <td align="center" width="50%"><strong>商业 PPT · 转换图</strong><br><img src="assets/readme/business-converted.png" alt="商业 PPT 可编辑转换图" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><strong>学术图 · 原图</strong><br><img src="assets/readme/scientific-source.png" alt="学术图原图" width="100%"></td>
+    <td align="center" width="50%"><strong>学术图 · 转换图</strong><br><img src="assets/readme/scientific-converted.png" alt="学术图可编辑转换图" width="100%"></td>
+  </tr>
+</table>
+
+### 🔎 案例一：清晰度
+
+下图对同一复杂局部进行放大比较，**左下角是 Image2PPT**，其余位置为其他 Image-to-PPT 方案。在本组案例中，Image2PPT 对图标轮廓、文字边缘和细线条的保留最清楚，整体清晰度表现最佳。
+
+<p align="center"><img src="assets/readme/clarity-comparison.png" alt="复杂局部转换清晰度对比" width="100%"></p>
+
+### 🧬 案例二：细节还原
+
+下图比较复杂科研流程图的完整重建结果，**左下角是 Image2PPT**，其余位置为其他 Image-to-PPT 方案。在本组案例中，Image2PPT 更完整地保留知识图谱节点、关系连接线、箭头方向、图表结构和局部排版，细节还原度最高。
+
+<p align="center"><img src="assets/readme/detail-comparison.png" alt="学术图细节与箭头重建对比" width="100%"></p>
+
+## 典型请求
+
+> 使用 $image2ppt，把这组幻灯片图片按顺序还原成可编辑 PPTX；文字、时间线和箭头需要保持可编辑。
+
+> 使用 $image2ppt 重建这张科研框架图；知识图谱节点、关系线和普通箭头需要是独立的 PowerPoint 原生对象，并在渲染检查通过后交付。
+
+## 你需要提供
+
+- 一张或多张按顺序排列的 PNG/JPG，或扫描 PDF、图片型 PPT/PPTX。
+
+## 产出
+
+- 对象级可编辑的 `.pptx`，保留可测量的文字、形状、节点、连接线和箭头。
+- 页面与最终文件的 QA 报告；无法可靠原生重建的复杂局部视觉会作为可替换资产保留。
+
+## 安装与配置
+
+### 1. 安装 Skill
+
+将下面对应的一段话直接交给 Agent 即可。安装时必须复制包含 `SKILL.md`、`cli/`、`prompts/`、`references/` 和运行资源的完整 Skill，不能只复制 `SKILL.md`。
+
+#### Codex
+
+> 请从 `https://github.com/Paul-Jeo/Image2PPT` 获取完整的 Image2PPT Skill，安装到 `~/.codex/skills/image2ppt`。使用 Python 3.10 或更高版本安装该目录 `requirements.txt` 中的依赖，并根据当前系统补齐 LibreOffice、中文字体等 `doctor` 报告的依赖。最后运行 `python ~/.codex/skills/image2ppt/cli/image2ppt/cli.py doctor --json` 验证安装。
+
+#### Claude Code
+
+> 请从 `https://github.com/Paul-Jeo/Image2PPT` 获取完整的 Image2PPT Skill，安装到 `~/.claude/skills/image2ppt`。使用 Python 3.10 或更高版本安装该目录 `requirements.txt` 中的依赖，并根据当前系统补齐 LibreOffice、中文字体等 `doctor` 报告的依赖。最后运行 `python ~/.claude/skills/image2ppt/cli/image2ppt/cli.py doctor --json` 验证安装。
+
+### 2. 获取并配置百度 PaddleOCR Token
+
+Image2PPT 使用的是百度 AI Studio 的一个 **Access Token**（`PADDLE_OCR_TOKEN`），不是传统的 API Key 和 Secret Key（AK/SK）组合。
+
+1. 登录或注册 [百度 AI Studio](https://aistudio.baidu.com/)。
+2. 打开 [Access Token 页面](https://aistudio.baidu.com/account/accessToken)，按页面提示创建并复制 Token。
+3. 在本机执行以下命令写入用户级配置，并再次运行 `doctor` 验证：
+
+   ```bash
+   python /absolute/path/to/image2ppt/cli/image2ppt/cli.py config \
+     --paddle-ocr-token "<BAIDU_AI_STUDIO_ACCESS_TOKEN>"
+   python /absolute/path/to/image2ppt/cli/image2ppt/cli.py doctor --json
+   ```
+
+Token 默认保存在 `~/.image2ppt/config.yaml`，也可以通过环境变量 `PADDLE_OCR_TOKEN` 提供。请勿将真实 Token 提交到仓库或写入 Issue、日志和聊天。未配置或网络 OCR 失败时，Image2PPT 会回退到本地 `builtin-ink` 几何检测，但它只能测量文字区域，不能识别字符内容。
+
+## 边界
+
+- 用于还原已有视觉页面，不用于根据笔记、论文或提纲从零创作演示文稿。
+- 复杂插图、照片和无法可靠测量的局部效果可能保留为独立图片资产，不保证所有元素都转换为原生形状。
+- 低分辨率输入和缺失字体会限制还原精度；在线 OCR 会向百度服务上传当前任务页面，敏感材料应使用离线模式。
+
+## License
+
+本项目采用 [MIT License](LICENSE)。
