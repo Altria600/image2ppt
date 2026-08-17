@@ -80,11 +80,16 @@ def render_powerpoint(pptx: Path, out_dir: Path, timeout: int) -> tuple[list[Pat
         if prior.is_file():
             prior.unlink()
     script = (
-        "$ErrorActionPreference='Stop';"
-        "$app=New-Object -ComObject PowerPoint.Application;"
-        "try{$deck=$app.Presentations.Open(" + powershell_quote(pptx) + ",$true,$true,$false);"
-        "$deck.Export(" + powershell_quote(out_dir) + ",'PNG');$deck.Close()}"
-        "finally{$app.Quit();[System.Runtime.Interopservices.Marshal]::ReleaseComObject($app)|Out-Null}"
+        "$ErrorActionPreference='Stop';$app=$null;$deck=$null;"
+        "try{$app=New-Object -ComObject PowerPoint.Application;"
+        "$deck=$app.Presentations.Open(" + powershell_quote(pptx) + ",$true,$true,$false);"
+        "$deck.Export(" + powershell_quote(out_dir) + ",'PNG')}"
+        "finally{"
+        "if($null -ne $deck){try{$deck.Close()}catch{};"
+        "try{[System.Runtime.InteropServices.Marshal]::ReleaseComObject($deck)|Out-Null}catch{};$deck=$null};"
+        "if($null -ne $app){try{$app.Quit()}catch{};"
+        "try{[System.Runtime.InteropServices.Marshal]::ReleaseComObject($app)|Out-Null}catch{};$app=$null}"
+        "}"
     )
     command = [powershell, "-NoProfile", "-NonInteractive", "-Command", script]
     try:

@@ -164,7 +164,8 @@ class Image2PPTStateEndToEndTests(unittest.TestCase):
             self.assertEqual(jobs["pages"][0]["status"], "accepted")
             self.assertFalse((run / "image2ppt_jobs.json").exists())
             self.assertTrue((run / "final" / "image2ppt_qa.json").is_file())
-            self.assertTrue(json.loads((run / "final" / "image2ppt_qa.json").read_text())["passed"])
+            report_text = (run / "final" / "image2ppt_qa.json").read_text(encoding="utf-8")
+            self.assertTrue(json.loads(report_text)["passed"])
 
 
 if __name__ == "__main__":

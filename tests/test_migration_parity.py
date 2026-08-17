@@ -14,7 +14,7 @@ BASELINE_SHA256 = {
     "prompts/page-worker-base.md": "62530e2b3bdb1a2103decf68be6b8ebd49294bca55399da2e200687759d14d54",
     "prompts/page-worker.md": "4348386bcda8352e9d387eef99147a70ca885d3a7db16cb666de7fe738a1a27d",
     "cli/image2ppt/runtime/_page_artifacts.py": "f3c46c78cfd1661897d655bfdedd872bc27383325588c7bc7dc26186647e744b",
-    "cli/image2ppt/runtime/build_pptx_from_manifest.py": "d547fe8b1d04cf49375654c2e22a9d4a8b11fcd978a6cd3ceae65954f16c2cc0",
+    "cli/image2ppt/runtime/build_pptx_from_manifest.py": "0a5e8e7eb2df8180c26e1ab8fa3afc480239058d7000ea9f43f59e2789d4a0e9",
     "cli/image2ppt/runtime/deck_run_state.py": "f23da1f111e711f36e1f4ac3244bd64e38a50d9591f4a23b2380bb31891f04e9",
     "cli/image2ppt/runtime/finalize_deck_run.py": "fbf2f819c2c4d62144b5c6007fbaf17024eda3f56e436e7bff36aad08378b29d",
     "cli/image2ppt/runtime/paddle_text_hints.py": "c21c9912aaafdd22dd8399d5b07d8bc9a05732c015001079a7c1ff7ec0de0289",

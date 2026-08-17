@@ -688,7 +688,9 @@ def is_wide_slide(width, height):
 
 
 def slide_size_type(width, height):
-    return "wide" if is_wide_slide(width, height) else "custom"
+    # `wide` is not a valid ST_SlideSizeType value and makes PowerPoint reject
+    # the package. Use the OOXML 16:9 value while preserving manifest dimensions.
+    return "screen16x9" if is_wide_slide(width, height) else "custom"
 
 
 def presentation_xml(slide_count, width, height):
@@ -711,7 +713,7 @@ def presentation_rels_xml(slide_count):
 
 
 def write_common_parts(z, slide_count, width, height, notes_count):
-    presentation_format = "Widescreen" if slide_size_type(width, height) == "wide" else "Custom"
+    presentation_format = "Widescreen" if slide_size_type(width, height) == "screen16x9" else "Custom"
     z.writestr("_rels/.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>""")
     z.writestr("docProps/core.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Image to editable PPT</dc:title></cp:coreProperties>""")
     z.writestr("docProps/app.xml", f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Codex</Application><PresentationFormat>{presentation_format}</PresentationFormat><Slides>{slide_count}</Slides></Properties>""")

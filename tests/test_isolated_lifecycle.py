@@ -40,7 +40,11 @@ class IsolatedLifecycleTests(unittest.TestCase):
             self.assertFalse((isolated_parent / old_skill_name).exists())
             self.assertFalse((isolated_parent / other_skill_name).exists())
 
-            clean_path = os.pathsep.join(path for path in ("/usr/bin", "/bin") if Path(path).is_dir())
+            if sys.platform == "win32":
+                windows_dir = Path(os.environ.get("SystemRoot", "C:/Windows"))
+                clean_path = str(windows_dir / "System32" / "WindowsPowerShell" / "v1.0")
+            else:
+                clean_path = os.pathsep.join(path for path in ("/usr/bin", "/bin") if Path(path).is_dir())
             external_command = "edit" + "ppt"
             self.assertIsNone(shutil.which(external_command, path=clean_path))
             env = os.environ.copy()

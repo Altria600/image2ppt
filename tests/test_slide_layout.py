@@ -24,6 +24,9 @@ from prepare_deck_run import fit_content_box, slide_for_source  # noqa: E402
 
 def scalable_test_font():
     candidates = (
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/calibri.ttf",
+        "C:/Windows/Fonts/msyh.ttc",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
@@ -94,9 +97,9 @@ class SlideLayoutTest(unittest.TestCase):
         self.assertAlmostEqual(box["width"], position["width"])
         self.assertAlmostEqual(box["height"], position["height"])
 
-    def test_non_wide_presentation_size_is_custom(self):
+    def test_presentation_size_metadata_uses_valid_ooxml_values(self):
         self.assertEqual("custom", slide_size_type(emu(16), emu(10.6666667)))
-        self.assertEqual("wide", slide_size_type(emu(13.333), emu(7.5)))
+        self.assertEqual("screen16x9", slide_size_type(emu(13.333), emu(7.5)))
 
     def test_text_font_size_is_clamped_to_source_box(self):
         manifest = {

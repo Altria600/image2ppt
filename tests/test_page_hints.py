@@ -203,7 +203,7 @@ class DeckTextHintsTest(unittest.TestCase):
             for page_id in ("page_001", "page_002"):
                 hints_path = run_dir / "pages" / page_id / "text_hints.json"
                 self.assertTrue(hints_path.exists())
-                hints = _json.loads(hints_path.read_text())
+                hints = _json.loads(hints_path.read_text(encoding="utf-8"))
                 self.assertEqual("builtin-ink", hints["backend"])
                 self.assertTrue(hints["lines"], "fallback detector must report the drawn text")
                 self.assertTrue((run_dir / "pages" / page_id / "text_hints.png").exists())

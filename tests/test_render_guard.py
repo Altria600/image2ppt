@@ -5,13 +5,32 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
 from support import SCRIPTS
+from render_image2ppt_qa import render_powerpoint
 
 
 class RenderGuardTests(unittest.TestCase):
+    def test_powerpoint_command_releases_deck_before_application(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            completed = subprocess.CompletedProcess([], 1, "", "fixture")
+            with (
+                patch("render_image2ppt_qa.shutil.which", return_value="powershell.exe"),
+                patch("render_image2ppt_qa.subprocess.run", return_value=completed),
+            ):
+                _rendered, raw = render_powerpoint(root / "page.pptx", root / "render", 1)
+
+            script = raw["command"][-1]
+            self.assertLess(script.index("$app=$null;$deck=$null;"), script.index("try{"))
+            self.assertIn("finally{if($null -ne $deck)", script)
+            self.assertLess(script.index("$deck.Close()"), script.index("ReleaseComObject($deck)"))
+            self.assertLess(script.index("ReleaseComObject($deck)"), script.index("$app.Quit()"))
+            self.assertLess(script.index("$app.Quit()"), script.index("ReleaseComObject($app)"))
+
     def test_source_image_cannot_be_reused_as_render_proof(self) -> None:
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
