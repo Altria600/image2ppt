@@ -147,6 +147,21 @@ def px_to_inches(manifest, x, y, width, height):
 
 def normalize_position_item(manifest, item):
     item = dict(item)
+    if "bezier_px" in item:
+        segments = [[float(value) for value in segment] for segment in item["bezier_px"]]
+        if any(len(segment) != 8 for segment in segments):
+            raise ValueError("bezier_px segments must be [x1,y1,c1x,c1y,c2x,c2y,x2,y2]")
+        if segments and "box_px" not in item:
+            xs = [segment[index] for segment in segments for index in (0, 2, 4, 6)]
+            ys = [segment[index] for segment in segments for index in (1, 3, 5, 7)]
+            item["box_px"] = [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
+        item["bezier"] = []
+        for segment in segments:
+            converted = []
+            for index in range(0, 8, 2):
+                point = px_to_inches(manifest, segment[index], segment[index + 1], 0, 0)
+                converted.extend([point["left"], point["top"]])
+            item["bezier"].append(converted)
     if "polygon_px" in item:
         points = [(float(point[0]), float(point[1])) for point in item["polygon_px"]]
         if points and "box_px" not in item:
@@ -427,7 +442,9 @@ def shape_xml(idx, item):
     fill = shape_fill(item.get("fill"))
     line = shape_line_xml(item.get("stroke", "#000000"), stroke_width, item.get("dash"))
     preset = item.get("preset")
-    if item.get("polygon_px"):
+    if item.get("bezier_px"):
+        geometry = custom_bezier_geometry_xml(item)
+    elif item.get("polygon_px"):
         geometry = custom_polygon_geometry_xml(item)
     else:
         if not preset:
@@ -435,10 +452,56 @@ def shape_xml(idx, item):
         geometry = preset_geometry_xml(preset, item)
     return f"""
       <p:sp>
-        <p:nvSpPr><p:cNvPr id="{idx}" name="{xml_text(kind.title())} {idx}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+        <p:nvSpPr><p:cNvPr id="{idx}" name="{xml_text(item.get('id') or f'{kind.title()} {idx}')}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
         <p:spPr><a:xfrm{flip_h}{flip_v}><a:off x="{left}" y="{top}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm>{geometry}{fill}{line}</p:spPr>
         <p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody>
       </p:sp>"""
+
+
+def custom_bezier_geometry_xml(item):
+    segments = [[float(value) for value in segment] for segment in item.get("bezier_px", [])]
+    if not segments or any(len(segment) != 8 for segment in segments):
+        return '<a:prstGeom prst="line"><a:avLst/></a:prstGeom>'
+    box = item.get("box_px")
+    if box and len(box) == 4:
+        left, top, width, height = [float(value) for value in box]
+    else:
+        xs = [segment[index] for segment in segments for index in (0, 2, 4, 6)]
+        ys = [segment[index] for segment in segments for index in (1, 3, 5, 7)]
+        left, top = min(xs), min(ys)
+        width, height = max(xs) - left, max(ys) - top
+    width = max(width, 1.0)
+    height = max(height, 1.0)
+
+    def rel_coord(x, y):
+        return int(round((x - left) / width * 21600)), int(round((y - top) / height * 21600))
+
+    start_x, start_y = rel_coord(segments[0][0], segments[0][1])
+    commands = [f'<a:moveTo><a:pt x="{start_x}" y="{start_y}"/></a:moveTo>']
+    previous_end = (segments[0][0], segments[0][1])
+    for segment in segments:
+        start = (segment[0], segment[1])
+        if start != previous_end:
+            move_x, move_y = rel_coord(*start)
+            commands.append(f'<a:moveTo><a:pt x="{move_x}" y="{move_y}"/></a:moveTo>')
+        c1_x, c1_y = rel_coord(segment[2], segment[3])
+        c2_x, c2_y = rel_coord(segment[4], segment[5])
+        end_x, end_y = rel_coord(segment[6], segment[7])
+        commands.append(
+            '<a:cubicBezTo>'
+            f'<a:pt x="{c1_x}" y="{c1_y}"/>'
+            f'<a:pt x="{c2_x}" y="{c2_y}"/>'
+            f'<a:pt x="{end_x}" y="{end_y}"/>'
+            '</a:cubicBezTo>'
+        )
+        previous_end = (segment[6], segment[7])
+    return (
+        '<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/>'
+        '<a:rect l="l" t="t" r="r" b="b"/>'
+        '<a:pathLst><a:path w="21600" h="21600" fill="none" stroke="1">'
+        + "".join(commands)
+        + '</a:path></a:pathLst></a:custGeom>'
+    )
 
 
 def custom_polygon_geometry_xml(item):
@@ -658,7 +721,51 @@ def write_common_parts(z, slide_count, width, height, notes_count):
     z.writestr("ppt/slideMasters/_rels/slideMaster1.xml.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/></Relationships>""")
     z.writestr("ppt/slideLayouts/slideLayout1.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank" preserve="1"><p:cSld name="Blank"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>""")
     z.writestr("ppt/slideLayouts/_rels/slideLayout1.xml.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>""")
-    z.writestr("ppt/theme/theme1.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="ImageToEditablePPT"><a:themeElements><a:clrScheme name="Office"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F1F1F"/></a:dk2><a:lt2><a:srgbClr val="F8F8F8"/></a:lt2><a:accent1><a:srgbClr val="0F766E"/></a:accent1><a:accent2><a:srgbClr val="E66B00"/></a:accent2><a:accent3><a:srgbClr val="F6D365"/></a:accent3><a:accent4><a:srgbClr val="57C4B8"/></a:accent4><a:accent5><a:srgbClr val="666666"/></a:accent5><a:accent6><a:srgbClr val="111111"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme><a:fontScheme name="PingFang"><a:majorFont><a:latin typeface="PingFang SC"/><a:ea typeface="PingFang SC"/><a:cs typeface="PingFang SC"/></a:majorFont><a:minorFont><a:latin typeface="PingFang SC"/><a:ea typeface="PingFang SC"/><a:cs typeface="PingFang SC"/></a:minorFont></a:fontScheme><a:fmtScheme name="Office"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>""")
+    z.writestr("ppt/theme/theme1.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="ImageToEditablePPT">
+  <a:themeElements>
+    <a:clrScheme name="Office">
+      <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>
+      <a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="1F1F1F"/></a:dk2>
+      <a:lt2><a:srgbClr val="F8F8F8"/></a:lt2>
+      <a:accent1><a:srgbClr val="0F766E"/></a:accent1>
+      <a:accent2><a:srgbClr val="E66B00"/></a:accent2>
+      <a:accent3><a:srgbClr val="F6D365"/></a:accent3>
+      <a:accent4><a:srgbClr val="57C4B8"/></a:accent4>
+      <a:accent5><a:srgbClr val="666666"/></a:accent5>
+      <a:accent6><a:srgbClr val="111111"/></a:accent6>
+      <a:hlink><a:srgbClr val="0563C1"/></a:hlink>
+      <a:folHlink><a:srgbClr val="954F72"/></a:folHlink>
+    </a:clrScheme>
+    <a:fontScheme name="Microsoft YaHei">
+      <a:majorFont><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/><a:cs typeface="Microsoft YaHei"/></a:majorFont>
+      <a:minorFont><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/><a:cs typeface="Microsoft YaHei"/></a:minorFont>
+    </a:fontScheme>
+    <a:fmtScheme name="Office">
+      <a:fillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:fillStyleLst>
+      <a:lnStyleLst>
+        <a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>
+        <a:ln w="25400"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>
+        <a:ln w="38100"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>
+      </a:lnStyleLst>
+      <a:effectStyleLst>
+        <a:effectStyle><a:effectLst/></a:effectStyle>
+        <a:effectStyle><a:effectLst/></a:effectStyle>
+        <a:effectStyle><a:effectLst/></a:effectStyle>
+      </a:effectStyleLst>
+      <a:bgFillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:bgFillStyleLst>
+    </a:fmtScheme>
+  </a:themeElements>
+</a:theme>""")
     if notes_count:
         z.writestr("ppt/notesMasters/notesMaster1.xml", notes_master_xml())
         z.writestr("ppt/notesMasters/_rels/notesMaster1.xml.rels", notes_master_rels_xml())
@@ -797,7 +904,18 @@ def render_preview(manifest, manifest_path, out_path):
         fill = preview_color(item.get("fill"))
         outline = preview_color(item.get("stroke", "#000000"))
         width = max(1, int(float(item.get("stroke_width", 1))))
-        if item.get("polygon"):
+        if item.get("bezier"):
+            points = []
+            for segment in item["bezier"]:
+                x1, y1, c1x, c1y, c2x, c2y, x2, y2 = segment
+                for step in range(25):
+                    t = step / 24.0
+                    inv = 1.0 - t
+                    x = inv ** 3 * x1 + 3 * inv ** 2 * t * c1x + 3 * inv * t ** 2 * c2x + t ** 3 * x2
+                    y = inv ** 3 * y1 + 3 * inv ** 2 * t * c1y + 3 * inv * t ** 2 * c2y + t ** 3 * y2
+                    points.append((x * scale, y * scale))
+            draw.line(points, fill=outline, width=width, joint="curve")
+        elif item.get("polygon"):
             points = [(point[0] * scale, point[1] * scale) for point in item["polygon"]]
             draw.polygon(points, fill=None if fill in (None, "none") else fill, outline=None if outline == "none" else outline)
         elif item.get("type") == "line":
@@ -939,6 +1057,7 @@ def render_preview(manifest, manifest_path, out_path):
 def choose_preview_font(preferred):
     candidates = [
         preferred,
+        "C:/Windows/Fonts/msyh.ttc",
         "/System/Library/Fonts/STHeiti Medium.ttc",
         "/System/Library/Fonts/STHeiti Light.ttc",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",

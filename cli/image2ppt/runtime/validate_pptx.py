@@ -374,6 +374,22 @@ def pixel_authoring_violations(manifest):
                         "reason": "line shapes must use source-image pixel endpoints",
                     }
                 )
+        elif item.get("type") == "bezier":
+            if "box_px" not in item:
+                violations.append(
+                    {
+                        "field": f"shapes[{index}].box_px",
+                        "reason": "Bezier shapes must use a source-image pixel bounding box",
+                    }
+                )
+            segments = item.get("bezier_px")
+            if not isinstance(segments, list) or not segments or any(not isinstance(segment, list) or len(segment) != 8 for segment in segments):
+                violations.append(
+                    {
+                        "field": f"shapes[{index}].bezier_px",
+                        "reason": "Bezier shapes require cubic segments [x1,y1,c1x,c1y,c2x,c2y,x2,y2]",
+                    }
+                )
         elif "box_px" not in item:
             violations.append(
                 {
@@ -433,7 +449,15 @@ def required_texts_from_manifest(manifest):
 
 def collect_text(xml_bytes):
     root = ET.fromstring(xml_bytes)
-    return "".join(node.text or "" for node in root.findall(".//a:t", NS))
+    paragraphs = []
+    for paragraph in root.findall(".//a:p", NS):
+        text = "".join(node.text or "" for node in paragraph.findall(".//a:t", NS)).strip()
+        if text:
+            paragraphs.append(text)
+    # Keep readable word boundaries across explicit line/paragraph breaks. This
+    # lets required-text checks validate visual multi-line labels such as
+    # "Format\nReward" without forcing them into an overflowing single line.
+    return " ".join(paragraphs)
 
 
 def collect_paragraph_text(xml_bytes):

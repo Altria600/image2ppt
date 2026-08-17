@@ -11,6 +11,11 @@ Use this directory as the complete runtime. Run deterministic actions only throu
 python <image2ppt-root>/cli/image2ppt/cli.py <command> ...
 ```
 
+For this project-local Windows deployment, substitute
+`<image2ppt-root>/.venv/Scripts/python.exe` for every `python` command below when
+that interpreter exists. It contains the pinned runtime dependencies and avoids
+depending on the user's global Python environment.
+
 Do not discover or invoke another Skill, CLI, Prompt, Schema, module, or state machine.
 
 ## Read the local contracts

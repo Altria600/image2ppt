@@ -212,6 +212,10 @@ Must contain:
 
 - `box_px: [x, y, width, height]`
 - `points_px: [x1, y1, x2, y2]`
+- `bezier_px`: one or more contiguous cubic segments, each encoded as
+  `[x1, y1, c1x, c1y, c2x, c2y, x2, y2]` in source pixels. Use
+  `type: "bezier"` plus `box_px` to create one editable PowerPoint freeform
+  curve; do not approximate a smooth chart curve with many straight shapes.
 
 Positioned build object requirements:
 
@@ -219,6 +223,9 @@ Positioned build object requirements:
 - Every `images[]` item must have `box_px`.
 - Every non-line `shapes[]` item must have `box_px`.
 - Every line shape must have `points_px`.
+- Every Bézier shape must have `box_px` and at least one valid `bezier_px`
+  segment. Consecutive segments should share endpoints so the rendered path has
+  continuous geometry.
 
 `text_inventory` and `visual_inventory` are only inventories; they do not substitute for positioned `text_boxes`, `images`, and `shapes`. The manifest must be sufficient to rebuild the page without reading any custom page script.
 

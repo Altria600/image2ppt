@@ -29,6 +29,7 @@ ANCHOR_KINDS = {
     "dashed-relationship",
     "arrowhead",
     "route-line",
+    "smooth-curve",
     "junction",
     "card-edge",
     "divider",

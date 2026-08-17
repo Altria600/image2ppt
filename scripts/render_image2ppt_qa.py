@@ -73,6 +73,12 @@ def render_powerpoint(pptx: Path, out_dir: Path, timeout: int) -> tuple[list[Pat
     if not powershell:
         return [], {"status": "renderer-unavailable", "error": "PowerShell was not found for PowerPoint COM"}
     out_dir.mkdir(parents=True, exist_ok=True)
+    # PowerPoint localizes exported slide filenames (for example, 幻灯片1.PNG).
+    # Remove only prior generated PNG renders so a stale rendered.png cannot be
+    # mistaken for the newest COM export on a repeat QA pass.
+    for prior in list(out_dir.glob("*.PNG")) + list(out_dir.glob("*.png")):
+        if prior.is_file():
+            prior.unlink()
     script = (
         "$ErrorActionPreference='Stop';"
         "$app=New-Object -ComObject PowerPoint.Application;"
