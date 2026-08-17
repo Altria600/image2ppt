@@ -7,8 +7,8 @@ files so page workers find their text measurements already in place.
 
 Backend selection per run:
 - With a PaddleOCR token (PADDLE_OCR_TOKEN env var, or PADDLE_OCR_TOKEN in the
-  active config.yaml): PDF inputs are submitted to the OCR service as ONE
-  job covering all pages; image/PPTX inputs submit each page's source.png.
+  active config.yaml): an original PDF is submitted as one multi-page job;
+  image and PPTX inputs submit each normalized source.png as its own job.
   OCR coordinates are rescaled to each page's actual source.png resolution
   and re-measured locally with the ink metrics.
 - Without a token, or when the service fails: the built-in offline detector
@@ -59,60 +59,29 @@ def builtin_page(page_dir: Path) -> dict:
     return hints
 
 
-def synthesize_pdf(page_dirs: list[Path], out_path: Path) -> None:
-    """Bundle the per-page source images into one PDF (one page per image).
-
-    Lets every input type — single image, multiple images, image-based PPTX —
-    reach the OCR service as a single batch job instead of one job per page.
-    Page size is the image's pixel size in points; build_page_hints rescales
-    the OCR coordinates back to each source.png regardless of the resolution
-    the service rendered at.
-    """
-    if not page_dirs:
-        raise ValueError("Cannot synthesize an empty PDF.")
-    for index, page_dir in enumerate(page_dirs):
-        with Image.open(page_dir / "source.png") as image:
-            rgb = image.convert("RGB")
-            try:
-                rgb.save(
-                    out_path,
-                    "PDF",
-                    append=index > 0,
-                    resolution=72.0,
-                    quality=100,
-                    subsampling=0,
-                )
-            finally:
-                rgb.close()
-
-
 def paddle_pages(run_dir: Path, deck: dict, page_dirs: list[Path], token: str, timeout: int) -> dict[Path, dict]:
-    """Fetch OCR results for all pages in ONE job; returns {page_dir: hints}."""
-    import tempfile
-
+    """Fetch OCR results without converting normalized images to a PDF."""
     from paddle_text_hints import DEFAULT_MODEL, build_page_hints, submit_and_fetch
 
-    original = None
+    original_pdf = None
     if str(deck.get("input_type", "")) == "pdf":
         input_dir = run_dir / "input"
         candidates = sorted(input_dir.glob("*.pdf")) if input_dir.exists() else []
-        original = candidates[0] if candidates else None
+        original_pdf = candidates[0] if candidates else None
 
-    synthesized = None
-    try:
-        if original is None:
-            handle = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-            handle.close()
-            synthesized = Path(handle.name)
-            synthesize_pdf(page_dirs, synthesized)
-            original = synthesized
-        pages = submit_and_fetch(original, token, DEFAULT_MODEL, timeout)
-    finally:
-        if synthesized is not None:
-            synthesized.unlink(missing_ok=True)
-    if len(pages) != len(page_dirs):
-        raise RuntimeError(f"OCR returned {len(pages)} pages for {len(page_dirs)} page dirs")
-    return {page_dir: build_page_hints(page_dir, pruned) for page_dir, pruned in zip(page_dirs, pages)}
+    if original_pdf is not None:
+        pages = submit_and_fetch(original_pdf, token, DEFAULT_MODEL, timeout)
+        if len(pages) != len(page_dirs):
+            raise RuntimeError(f"OCR returned {len(pages)} pages for {len(page_dirs)} page dirs")
+        return {page_dir: build_page_hints(page_dir, pruned) for page_dir, pruned in zip(page_dirs, pages)}
+
+    results = {}
+    for page_dir in page_dirs:
+        pages = submit_and_fetch(page_dir / "source.png", token, DEFAULT_MODEL, timeout)
+        if len(pages) != 1:
+            raise RuntimeError(f"OCR returned {len(pages)} pages for {page_dir.name}; expected 1")
+        results[page_dir] = build_page_hints(page_dir, pages[0])
+    return results
 
 
 def main() -> int:

@@ -201,6 +201,82 @@ class PaddleHttpRegressionTests(unittest.TestCase):
             self.assertEqual(hints["backend"], "builtin-ink")
             self.assertTrue(hints["lines"])
 
+    def test_image_pages_are_submitted_directly_one_job_per_page(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "run"
+            page_dirs = []
+            for index in range(2):
+                page = run / "pages" / f"page_{index + 1:03d}"
+                page.mkdir(parents=True)
+                Image.new("RGB", (40, 30), "white").save(page / "source.png")
+                page_dirs.append(page)
+            deck = {"input_type": "images"}
+            pruned = {"width": 40, "height": 30, "parsing_res_list": []}
+
+            with patch.object(
+                paddle_text_hints,
+                "submit_and_fetch",
+                side_effect=[[pruned], [pruned]],
+            ) as submit:
+                results = deck_text_hints.paddle_pages(run, deck, page_dirs, "token", 30)
+
+            self.assertEqual(list(results), page_dirs)
+            self.assertEqual(
+                [call.args[0] for call in submit.call_args_list],
+                [page / "source.png" for page in page_dirs],
+            )
+
+    def test_original_pdf_is_submitted_as_one_multi_page_job(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "run"
+            input_dir = run / "input"
+            input_dir.mkdir(parents=True)
+            original = input_dir / "original.pdf"
+            original.write_bytes(b"pdf fixture")
+            page_dirs = []
+            for index in range(2):
+                page = run / "pages" / f"page_{index + 1:03d}"
+                page.mkdir(parents=True)
+                Image.new("RGB", (40, 30), "white").save(page / "source.png")
+                page_dirs.append(page)
+            deck = {"input_type": "pdf"}
+            pruned = {"width": 40, "height": 30, "parsing_res_list": []}
+
+            with patch.object(
+                paddle_text_hints,
+                "submit_and_fetch",
+                return_value=[pruned, pruned],
+            ) as submit:
+                results = deck_text_hints.paddle_pages(run, deck, page_dirs, "token", 30)
+
+            self.assertEqual(list(results), page_dirs)
+            submit.assert_called_once_with(original, "token", paddle_text_hints.DEFAULT_MODEL, 30)
+
+    def test_pdf_without_original_submits_normalized_images_directly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "run"
+            page = run / "pages" / "page_001"
+            page.mkdir(parents=True)
+            source = page / "source.png"
+            Image.new("RGB", (40, 30), "white").save(source)
+            pruned = {"width": 40, "height": 30, "parsing_res_list": []}
+
+            with patch.object(
+                paddle_text_hints,
+                "submit_and_fetch",
+                return_value=[pruned],
+            ) as submit:
+                results = deck_text_hints.paddle_pages(
+                    run,
+                    {"input_type": "pdf"},
+                    [page],
+                    "token",
+                    30,
+                )
+
+            self.assertEqual(list(results), [page])
+            submit.assert_called_once_with(source, "token", paddle_text_hints.DEFAULT_MODEL, 30)
+
     def test_ocr_blocks_become_content_aware_measured_hints(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             page = Path(tmp)

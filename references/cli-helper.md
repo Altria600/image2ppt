@@ -199,7 +199,7 @@ When used with a configured PaddleOCR token, this command calls the external OCR
 image2ppt page hints pages/page_001
 ```
 
-Purpose: detect the text lines on one page's `source.png` and write `text_hints.json` (each line's source-pixel `box_px`, measured glyph height, and derived font sizes) plus `text_hints.png`, the source image with every detected line framed and labeled. `image2ppt prepare` already runs this for every page (PDF inputs are OCR'd in one batch job when a PaddleOCR token is available via the `PADDLE_OCR_TOKEN` environment variable or active `config.yaml`; otherwise the built-in offline detector runs). Use this command only to regenerate hints for a page. How to consume the hints is defined in `page-decision-tree.md` section 3.1.
+Purpose: detect the text lines on one page's `source.png` and write `text_hints.json` (each line's source-pixel `box_px`, measured glyph height, and derived font sizes) plus `text_hints.png`, the source image with every detected line framed and labeled. `image2ppt prepare` already runs this for every page. With a PaddleOCR token, an original PDF is submitted as one multi-page job; image and PPT/PPTX inputs submit each normalized `source.png` directly as a separate job. Without a token, the built-in offline detector runs. Use this command only to regenerate hints for a page. How to consume the hints is defined in `page-decision-tree.md` section 3.1.
 
 ## Image Backend Commands
 

@@ -29,9 +29,11 @@ Do not change response interpretation or add another OCR normalizer. Missing pag
 non-200 submission, failed jobs, timeout, malformed/empty results, download errors,
 and network exceptions are OCR failures.
 
-For multi-page work, submit one job per run: use the original PDF when available;
-otherwise synthesize one temporary PDF from normalized `source.png` pages. Rescale
-service coordinates to each actual source image before local measurement.
+Use the original PDF as one multi-page job when it is available. For a single image,
+multiple images, PPT/PPTX pages, or a PDF run whose original file is unavailable,
+submit each normalized `source.png` directly as its own job, in page order. Never
+convert normalized images into a temporary PDF for OCR. Rescale service coordinates
+to each actual source image before local measurement.
 
 ## Text filtering and local measurement
 
