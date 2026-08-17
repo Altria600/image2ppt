@@ -65,33 +65,27 @@ The figure below compares complete reconstructions of a complex scientific flowc
 
 ## Installation and Configuration
 
-### 1. Install the Skill
+### 1. Get a PaddleOCR Token
 
-Give the matching instruction below directly to your Agent. Install the complete Skill containing `SKILL.md`, `cli/`, `prompts/`, `references/`, and its runtime resources; copying only `SKILL.md` is not sufficient.
+Sign in to [Baidu AI Studio](https://aistudio.baidu.com/) and create a token on the [Access Token page](https://aistudio.baidu.com/account/accessToken). Image2PPT uses one `PADDLE_OCR_TOKEN`, not an AK/SK pair.
+
+### 2. Let Your Agent Install It
+
+Replace the token placeholder in the matching instruction, then give the whole block to your Agent.
 
 #### Codex
 
-> Fetch the complete Image2PPT Skill from `https://github.com/Paul-Jeo/Image2PPT` and install it at `~/.codex/skills/image2ppt`. With Python 3.10 or later, install the dependencies from its `requirements.txt`, then install any system requirements reported by `doctor`, such as LibreOffice and CJK fonts. Finally, verify the installation with `python ~/.codex/skills/image2ppt/cli/image2ppt/cli.py doctor --json`.
+> My PaddleOCR Token is `<PADDLE_OCR_TOKEN>`. Fetch the complete project from `https://github.com/Paul-Jeo/Image2PPT` and install it as `.agents/skills/image2ppt` in the current project. Install the dependencies from `requirements.txt`, copy `config.example.yaml` to `config.yaml` in the same directory, and write the Token only to that file without echoing or committing it. Install any system dependencies reported by `doctor`, then run `doctor --json` and confirm that `config_scope` is `project` and the PaddleOCR Token status is `set`.
 
 #### Claude Code
 
-> Fetch the complete Image2PPT Skill from `https://github.com/Paul-Jeo/Image2PPT` and install it at `~/.claude/skills/image2ppt`. With Python 3.10 or later, install the dependencies from its `requirements.txt`, then install any system requirements reported by `doctor`, such as LibreOffice and CJK fonts. Finally, verify the installation with `python ~/.claude/skills/image2ppt/cli/image2ppt/cli.py doctor --json`.
+> My PaddleOCR Token is `<PADDLE_OCR_TOKEN>`. Fetch the complete project from `https://github.com/Paul-Jeo/Image2PPT` and install it as `.claude/skills/image2ppt` in the current project. Install the dependencies from `requirements.txt`, copy `config.example.yaml` to `config.yaml` in the same directory, and write the Token only to that file without echoing or committing it. Install any system dependencies reported by `doctor`, then run `doctor --json` and confirm that `config_scope` is `project` and the PaddleOCR Token status is `set`.
 
-### 2. Get and Configure a Baidu PaddleOCR Token
+### 3. Configuration Notes
 
-Image2PPT uses one **Baidu AI Studio Access Token** (`PADDLE_OCR_TOKEN`), not a traditional API Key and Secret Key (AK/SK) pair.
+`config.example.yaml` is only a template; the program reads the adjacent `config.yaml`, which Git ignores. Precedence is: environment variables > `IMAGE2PPT_CONFIG_HOME` > project-level `config.yaml` > legacy `~/.image2ppt/config.yaml`.
 
-1. Sign in to or register with [Baidu AI Studio](https://aistudio.baidu.com/).
-2. Open the [Access Token page](https://aistudio.baidu.com/account/accessToken), then create and copy a token as instructed.
-3. Save it in the user-level configuration and rerun `doctor`:
-
-   ```bash
-   python /absolute/path/to/image2ppt/cli/image2ppt/cli.py config \
-     --paddle-ocr-token "<BAIDU_AI_STUDIO_ACCESS_TOKEN>"
-   python /absolute/path/to/image2ppt/cli/image2ppt/cli.py doctor --json
-   ```
-
-The token is stored in `~/.image2ppt/config.yaml` by default and can alternatively be supplied through `PADDLE_OCR_TOKEN`. Never commit a real token or place it in an issue, log, or chat. If no token is configured or network OCR fails, Image2PPT falls back to local `builtin-ink` geometry detection, which measures text regions but does not recognize their characters.
+If the Token is unavailable or network OCR fails, Image2PPT falls back to `builtin-ink`, which measures text regions but does not recognize their contents.
 
 ## Boundaries
 

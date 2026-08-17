@@ -30,12 +30,41 @@ def cli_reinstall_hint() -> str:
     return "`python -m pip install -r <image2ppt-root>/requirements.txt`"
 
 
-def runtime_home() -> Path:
-    return Path(os.getenv("IMAGE2PPT_CONFIG_HOME", DEFAULT_CONFIG_HOME)).expanduser()
+def project_config_path() -> Path:
+    return SKILL_ROOT / "config.yaml"
+
+
+def user_config_path() -> Path:
+    return Path(DEFAULT_CONFIG_HOME).expanduser() / "config.yaml"
 
 
 def config_path(home: Path | None = None) -> Path:
-    return (home or runtime_home()) / "config.yaml"
+    if home is not None:
+        return Path(home).expanduser() / "config.yaml"
+    explicit_home = os.getenv("IMAGE2PPT_CONFIG_HOME", "").strip()
+    if explicit_home:
+        return Path(explicit_home).expanduser() / "config.yaml"
+    project = project_config_path()
+    if project.is_file():
+        return project
+    user = user_config_path()
+    if user.is_file():
+        return user
+    # A fresh project-local Skill creates config.yaml beside config.example.yaml.
+    return project
+
+
+def runtime_home() -> Path:
+    return config_path().parent
+
+
+def config_scope(path: Path | None = None) -> str:
+    resolved = (path or config_path()).resolve()
+    if resolved == project_config_path().resolve():
+        return "project"
+    if resolved == user_config_path().resolve():
+        return "user"
+    return "override"
 
 
 def read_config_file(path: Path) -> dict:
@@ -222,7 +251,8 @@ def internal_resource_status() -> dict:
 
 def collect_status(check_api: bool = False, check_ocr: bool = False) -> dict:
     home = runtime_home()
-    config_values = read_config_file(config_path(home))
+    active_config = config_path(home)
+    config_values = read_config_file(active_config)
     values = dict(config_values)
     for key in ENV_FIELDS:
         if os.getenv(key):
@@ -256,8 +286,9 @@ def collect_status(check_api: bool = False, check_ocr: bool = False) -> dict:
         "skill_root": str(SKILL_ROOT),
         "local_cli": {"path": str(CLI_ENTRY), "ready": CLI_ENTRY.is_file(), "python": sys.executable},
         "config_home": str(home),
-        "config_file": str(config_path(home)),
-        "config_exists": config_path(home).exists(),
+        "config_file": str(active_config),
+        "config_scope": config_scope(active_config),
+        "config_exists": active_config.exists(),
         "dependencies": modules,
         "internal_resources": resources,
         "rendering": renderer,
@@ -331,7 +362,7 @@ def main() -> None:
     doc.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     doc.add_argument("--timeout", type=int, default=30, help="Reserved for opt-in network probes.")
     doc.set_defaults(func=doctor)
-    cfg = sub.add_parser("config", help="Write or update ~/.image2ppt/config.yaml")
+    cfg = sub.add_parser("config", help="Write or update the active project/user config.yaml")
     cfg.add_argument("--api-key", help="OpenAI or OpenAI-compatible image API key to store.")
     cfg.add_argument("--base-url", help="OpenAI-compatible base URL.")
     cfg.add_argument("--clear-base-url", action="store_true", help="Remove OPENAI_BASE_URL from the config file.")

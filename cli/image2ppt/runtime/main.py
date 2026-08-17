@@ -456,11 +456,12 @@ Agent-only image_gen.imagegen tool and does not perform a network API probe.
 
     config = sub.add_parser(
         "config",
-        help="Write or update ~/.image2ppt/config.yaml.",
+        help="Write or update the active project/user config.yaml.",
         description="""Configure API fallback values used by image2ppt image commands.
 
-Values are written to ~/.image2ppt/config.yaml. Environment variables still win at
-runtime. API keys are masked in command output.
+Values are written to the active config file. A project-level config.yaml beside
+config.example.yaml takes precedence over the legacy user-level file. Environment
+variables still win at runtime. API keys are masked in command output.
 """,
         formatter_class=HELP_FORMATTER,
         epilog="""Examples:

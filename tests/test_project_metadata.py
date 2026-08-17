@@ -21,6 +21,9 @@ class ProjectMetadataTests(unittest.TestCase):
             self.assertIn("https://github.com/Paul-Jeo/Image2PPT", readme)
             self.assertNotIn("<IMAGE2PPT_REPOSITORY>", readme)
             self.assertNotIn("https://github.com/Paul-Jeo/fed_llm", readme)
+            self.assertIn("config.example.yaml", readme)
+            self.assertIn("config.yaml", readme)
+            self.assertIn("IMAGE2PPT_CONFIG_HOME", readme)
         self.assertEqual(
             len(re.findall(r"^## ", readme_cn, flags=re.MULTILINE)),
             len(re.findall(r"^## ", readme_en, flags=re.MULTILINE)),

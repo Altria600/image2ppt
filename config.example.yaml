@@ -1,5 +1,7 @@
-# Copy to ~/.image2ppt/config.yaml and fill secrets locally.
-# On Linux/macOS: chmod 600 ~/.image2ppt/config.yaml
+# Project-level Skill: copy this file to ./config.yaml and fill secrets locally.
+# config.yaml is ignored by Git and must never be committed.
+# Global/legacy installation: ~/.image2ppt/config.yaml remains supported.
+# On Linux/macOS: chmod 600 ./config.yaml
 
 # One Baidu AI Studio Access Token, not an API Key/Secret Key pair.
 # Apply at https://aistudio.baidu.com/account/accessToken

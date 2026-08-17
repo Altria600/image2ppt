@@ -64,33 +64,27 @@
 
 ## 安装与配置
 
-### 1. 安装 Skill
+### 1. 获取 PaddleOCR Token
 
-将下面对应的一段话直接交给 Agent 即可。安装时必须复制包含 `SKILL.md`、`cli/`、`prompts/`、`references/` 和运行资源的完整 Skill，不能只复制 `SKILL.md`。
+登录 [百度 AI Studio](https://aistudio.baidu.com/)，在 [Access Token 页面](https://aistudio.baidu.com/account/accessToken) 创建 Token。Image2PPT 使用的是一个 `PADDLE_OCR_TOKEN`，不是 AK/SK 组合。
+
+### 2. 让 Agent 完成安装
+
+将 Token 替换到下面对应的指令中，再整段交给 Agent。
 
 #### Codex
 
-> 请从 `https://github.com/Paul-Jeo/Image2PPT` 获取完整的 Image2PPT Skill，安装到 `~/.codex/skills/image2ppt`。使用 Python 3.10 或更高版本安装该目录 `requirements.txt` 中的依赖，并根据当前系统补齐 LibreOffice、中文字体等 `doctor` 报告的依赖。最后运行 `python ~/.codex/skills/image2ppt/cli/image2ppt/cli.py doctor --json` 验证安装。
+> 我的 PaddleOCR Token 是 `<PADDLE_OCR_TOKEN>`。请从 `https://github.com/Paul-Jeo/Image2PPT` 将完整项目安装为当前项目的 `.agents/skills/image2ppt` Skill。安装 `requirements.txt` 中的依赖，将 `config.example.yaml` 复制为同目录的 `config.yaml`，仅把 Token 写入该文件，不要回显或提交。补齐 `doctor` 报告的系统依赖，最后运行 `doctor --json`，确认 `config_scope` 为 `project`、PaddleOCR Token 状态为 `set`。
 
 #### Claude Code
 
-> 请从 `https://github.com/Paul-Jeo/Image2PPT` 获取完整的 Image2PPT Skill，安装到 `~/.claude/skills/image2ppt`。使用 Python 3.10 或更高版本安装该目录 `requirements.txt` 中的依赖，并根据当前系统补齐 LibreOffice、中文字体等 `doctor` 报告的依赖。最后运行 `python ~/.claude/skills/image2ppt/cli/image2ppt/cli.py doctor --json` 验证安装。
+> 我的 PaddleOCR Token 是 `<PADDLE_OCR_TOKEN>`。请从 `https://github.com/Paul-Jeo/Image2PPT` 将完整项目安装为当前项目的 `.claude/skills/image2ppt` Skill。安装 `requirements.txt` 中的依赖，将 `config.example.yaml` 复制为同目录的 `config.yaml`，仅把 Token 写入该文件，不要回显或提交。补齐 `doctor` 报告的系统依赖，最后运行 `doctor --json`，确认 `config_scope` 为 `project`、PaddleOCR Token 状态为 `set`。
 
-### 2. 获取并配置百度 PaddleOCR Token
+### 3. 配置说明
 
-Image2PPT 使用的是百度 AI Studio 的一个 **Access Token**（`PADDLE_OCR_TOKEN`），不是传统的 API Key 和 Secret Key（AK/SK）组合。
+`config.example.yaml` 只是模板，程序实际读取同目录的 `config.yaml`；后者已被 Git 忽略。读取优先级为：环境变量 > `IMAGE2PPT_CONFIG_HOME` > 项目级 `config.yaml` > 旧版 `~/.image2ppt/config.yaml`。
 
-1. 登录或注册 [百度 AI Studio](https://aistudio.baidu.com/)。
-2. 打开 [Access Token 页面](https://aistudio.baidu.com/account/accessToken)，按页面提示创建并复制 Token。
-3. 在本机执行以下命令写入用户级配置，并再次运行 `doctor` 验证：
-
-   ```bash
-   python /absolute/path/to/image2ppt/cli/image2ppt/cli.py config \
-     --paddle-ocr-token "<BAIDU_AI_STUDIO_ACCESS_TOKEN>"
-   python /absolute/path/to/image2ppt/cli/image2ppt/cli.py doctor --json
-   ```
-
-Token 默认保存在 `~/.image2ppt/config.yaml`，也可以通过环境变量 `PADDLE_OCR_TOKEN` 提供。请勿将真实 Token 提交到仓库或写入 Issue、日志和聊天。未配置或网络 OCR 失败时，Image2PPT 会回退到本地 `builtin-ink` 几何检测，但它只能测量文字区域，不能识别字符内容。
+未配置 Token 或网络 OCR 失败时，程序会回退到 `builtin-ink`，只能测量文字区域，不能识别文字内容。
 
 ## 边界
 

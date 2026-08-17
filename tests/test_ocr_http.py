@@ -18,6 +18,7 @@ sys.path.insert(0, str(RUNTIME))
 
 import deck_text_hints  # noqa: E402
 import paddle_text_hints  # noqa: E402
+import runtime_env  # noqa: E402
 
 
 class FakeResponse:
@@ -57,6 +58,21 @@ def write_run(run: Path) -> Path:
 
 
 class PaddleHttpRegressionTests(unittest.TestCase):
+    def test_project_config_precedes_legacy_user_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "skill"
+            user = root / "user"
+            project.mkdir()
+            user.mkdir()
+            (project / "config.yaml").write_text('PADDLE_OCR_TOKEN: "project-token"\n', encoding="utf-8")
+            (user / "config.yaml").write_text('PADDLE_OCR_TOKEN: "user-token"\n', encoding="utf-8")
+            with patch.object(runtime_env, "SKILL_ROOT", project), patch.object(
+                runtime_env, "DEFAULT_CONFIG_HOME", str(user)
+            ), patch.dict(os.environ, {"IMAGE2PPT_CONFIG_HOME": ""}, clear=False):
+                self.assertEqual(project / "config.yaml", runtime_env.config_path())
+                self.assertEqual("project", runtime_env.config_scope())
+
     def test_token_environment_has_priority_over_local_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

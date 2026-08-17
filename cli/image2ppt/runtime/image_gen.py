@@ -43,7 +43,6 @@ GPT_IMAGE_2_MAX_EDGE = 3840
 GPT_IMAGE_2_MAX_RATIO = 3.0
 
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
-DEFAULT_CONFIG_HOME = "~/.image2ppt"
 DEFAULT_CODEX_AUTH_FILE = "~/.codex/auth.json"
 DEFAULT_CODEX_IMAGES_BASE_URL = "https://chatgpt.com/backend-api/codex"
 ENV_FIELDS = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "IMAGE2PPT_IMAGE_MODEL")
@@ -138,12 +137,12 @@ def _warn(message: str) -> None:
     print(f"Warning: {message}", file=sys.stderr)
 
 
-def _runtime_home() -> Path:
-    return Path(os.getenv("IMAGE2PPT_CONFIG_HOME", DEFAULT_CONFIG_HOME)).expanduser()
-
-
 def _runtime_env_path() -> Path:
-    return _runtime_home() / "config.yaml"
+    try:
+        from .runtime_env import config_path
+    except ImportError:
+        from runtime_env import config_path
+    return config_path()
 
 
 def _load_runtime_env() -> None:
@@ -154,7 +153,7 @@ def _load_runtime_env() -> None:
         import yaml
     except ImportError as exc:
         _die(
-            "PyYAML is required to read ~/.image2ppt/config.yaml. "
+            "PyYAML is required to read the active Image2PPT config.yaml. "
             "Reinstall image2ppt with pipx so package dependencies are installed."
         )
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
