@@ -3,7 +3,7 @@
 
 The CLI prefers local Codex OAuth auth when ~/.codex/auth.json is available.
 If Codex auth is missing, it falls back to OpenAI-compatible API credentials
-from the environment or ~/.image2ppt/config.yaml.
+from the environment or the active Image2PPT config.yaml.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ IMAGE_HELP_EPILOG = """\
 Backend selection:
   Codex OAuth: uses ~/.codex/auth.json or CODEX_AUTH_FILE.
   API fallback: uses OPENAI_API_KEY, OPENAI_BASE_URL, and
-  IMAGE2PPT_IMAGE_MODEL from the environment or ~/.image2ppt/config.yaml.
+  IMAGE2PPT_IMAGE_MODEL from the environment or the active config.yaml.
 
 Setup:
   codex login
@@ -89,8 +89,8 @@ Output:
 
 GENERATE_HELP_EPILOG = """\
 Backend:
-  Uses Codex OAuth when available, otherwise API fallback from ~/.image2ppt/config.yaml
-  or environment variables.
+  Uses Codex OAuth when available, otherwise API fallback from the active
+  Image2PPT config.yaml or environment variables.
 
 Use for:
   New supporting images that do not need to preserve an existing slide object.
@@ -102,8 +102,8 @@ Examples:
 
 EDIT_HELP_EPILOG = """\
 Backend:
-  Uses Codex OAuth when available, otherwise API fallback from ~/.image2ppt/config.yaml
-  or environment variables.
+  Uses Codex OAuth when available, otherwise API fallback from the active
+  Image2PPT config.yaml or environment variables.
 
 Use for:
   Background cleanup, clean base creation, foreground icon extraction, and
@@ -247,14 +247,48 @@ def _codex_base_url() -> str:
     ).strip()
     if not raw:
         return DEFAULT_CODEX_IMAGES_BASE_URL
-    if re.fullmatch(r"https?://chatgpt\.com/backend-api(?:/codex)?(?:/v1)?/?", raw, re.I):
+    if re.fullmatch(r"https://chatgpt\.com/backend-api(?:/codex)?(?:/v1)?/?", raw, re.I):
         return DEFAULT_CODEX_IMAGES_BASE_URL
-    return raw.rstrip("/")
+    raise RuntimeError(
+        "Refusing CODEX_IMAGES_BASE_URL override: Codex OAuth credentials may only be sent "
+        f"to {DEFAULT_CODEX_IMAGES_BASE_URL}. Use OPENAI_API_KEY and OPENAI_BASE_URL for "
+        "third-party image endpoints."
+    )
 
 
 def _codex_image_url(operation: str) -> str:
     endpoint = "images/edits" if operation == "edit" else "images/generations"
     return f"{_codex_base_url()}/{endpoint}"
+
+
+def _validate_codex_image_url(url: str) -> None:
+    if re.fullmatch(
+        r"https://chatgpt\.com/backend-api/codex/images/(?:generations|edits)",
+        url,
+    ):
+        return
+    raise RuntimeError(
+        "Refusing Codex OAuth request: credentials may only be sent to the official "
+        "ChatGPT Images endpoint."
+    )
+
+
+class _NoCodexRedirectHandler(request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise error.HTTPError(
+            req.full_url,
+            code,
+            f"Refusing Codex OAuth redirect to {newurl}",
+            headers,
+            fp,
+        )
+
+
+_CODEX_OPENER = request.build_opener(_NoCodexRedirectHandler())
+
+
+def _open_codex_request(req: request.Request, timeout: int):
+    return _CODEX_OPENER.open(req, timeout=timeout)
 
 
 def _guess_mime(path: Path) -> str:
@@ -319,6 +353,7 @@ def _format_attempts(attempts: int) -> str:
 
 
 def _post_codex_image_json(url: str, body: Dict[str, Any], timeout: int) -> Dict[str, Any]:
+    _validate_codex_image_url(url)
     auth = _load_codex_auth()
     if not auth:
         _die(f"Codex OAuth auth is missing. Expected {_codex_auth_file()}.")
@@ -342,7 +377,7 @@ def _post_codex_image_json(url: str, body: Dict[str, Any], timeout: int) -> Dict
             headers=headers,
         )
         try:
-            with request.urlopen(req, timeout=timeout) as resp:
+            with _open_codex_request(req, timeout) as resp:
                 text = resp.read(MAX_CODEX_RESPONSE_BYTES).decode("utf-8", errors="replace")
             break
         except error.HTTPError as exc:
@@ -433,7 +468,7 @@ def _ensure_api_key(dry_run: bool) -> None:
         "Neither Codex OAuth nor OPENAI_API_KEY is available for image2ppt image generation.\n"
         f"{target_hint}\n"
         f"To use Codex OAuth, run `codex login` so {_codex_auth_file()} exists.\n"
-        "To use a third-party OpenAI-compatible image API, configure ~/.image2ppt/config.yaml once:\n"
+        "To use a third-party OpenAI-compatible image API, configure the active Image2PPT config.yaml once:\n"
         f"  {command}\n"
         "To use a third-party proxy, set OPENAI_BASE_URL and the provider's model name."
     )

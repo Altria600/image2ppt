@@ -419,7 +419,8 @@ Use '<command> --help' for exact arguments:
         description="""Initialize the local image2ppt environment without installing the Skill.
 
 Use this after installing the CLI, or when checking whether the local runtime can run.
-It creates/checks ~/.image2ppt/config.yaml, preserves existing values, and runs doctor.
+It creates/checks the active project/override/user config.yaml, preserves existing values,
+and runs doctor.
 It does not call npx, does not install the Skill, and does not require API credentials
 unless --check-api is passed.
 """,
@@ -751,8 +752,8 @@ asset-sheet splitting inside page directories.
         formatter_class=HELP_FORMATTER,
         epilog="""Backend selection:
   Codex OAuth uses ~/.codex/auth.json or CODEX_AUTH_FILE.
-  API fallback uses ~/.image2ppt/config.yaml or OPENAI_API_KEY, OPENAI_BASE_URL,
-  and IMAGE2PPT_IMAGE_MODEL.
+  API fallback uses the active config.yaml or OPENAI_API_KEY, OPENAI_BASE_URL,
+  and IMAGE2PPT_IMAGE_MODEL. Third-party endpoints never receive Codex OAuth credentials.
 
 Setup:
   codex login

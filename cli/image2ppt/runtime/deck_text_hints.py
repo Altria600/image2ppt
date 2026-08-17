@@ -6,8 +6,8 @@ Runs as part of `image2ppt prepare`, after page directories exist: each
 files so page workers find their text measurements already in place.
 
 Backend selection per run:
-- With a PaddleOCR token (PADDLE_OCR_TOKEN env var, or PADDLE_OCR_TOKEN in
-  ~/.image2ppt/config.yaml): PDF inputs are submitted to the OCR service as ONE
+- With a PaddleOCR token (PADDLE_OCR_TOKEN env var, or PADDLE_OCR_TOKEN in the
+  active config.yaml): PDF inputs are submitted to the OCR service as ONE
   job covering all pages; image/PPTX inputs submit each page's source.png.
   OCR coordinates are rescaled to each page's actual source.png resolution
   and re-measured locally with the ink metrics.
@@ -68,16 +68,22 @@ def synthesize_pdf(page_dirs: list[Path], out_path: Path) -> None:
     the OCR coordinates back to each source.png regardless of the resolution
     the service rendered at.
     """
-    import fitz
-
-    document = fitz.open()
-    for page_dir in page_dirs:
+    if not page_dirs:
+        raise ValueError("Cannot synthesize an empty PDF.")
+    for index, page_dir in enumerate(page_dirs):
         with Image.open(page_dir / "source.png") as image:
-            width, height = image.size
-        page = document.new_page(width=width, height=height)
-        page.insert_image(fitz.Rect(0, 0, width, height), filename=str(page_dir / "source.png"))
-    document.save(out_path)
-    document.close()
+            rgb = image.convert("RGB")
+            try:
+                rgb.save(
+                    out_path,
+                    "PDF",
+                    append=index > 0,
+                    resolution=72.0,
+                    quality=100,
+                    subsampling=0,
+                )
+            finally:
+                rgb.close()
 
 
 def paddle_pages(run_dir: Path, deck: dict, page_dirs: list[Path], token: str, timeout: int) -> dict[Path, dict]:

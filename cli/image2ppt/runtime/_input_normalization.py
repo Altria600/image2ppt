@@ -58,18 +58,37 @@ def save_image_page(src, page_dir):
 
 
 def render_pdf_pages(pdf_path, pages_dir, dpi):
-    import fitz
+    import pypdfium2 as pdfium
 
-    doc = fitz.open(pdf_path)
+    document = pdfium.PdfDocument(str(pdf_path))
     outputs = []
-    matrix = fitz.Matrix(dpi / 72, dpi / 72)
-    for index, page in enumerate(doc, start=1):
-        page_dir = pages_dir / f"page_{index:03d}"
-        page_dir.mkdir(parents=True, exist_ok=True)
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
-        out = page_dir / "source.png"
-        pix.save(out)
-        outputs.append(out)
+    scale = dpi / 72.0
+    try:
+        for index in range(len(document)):
+            page = document[index]
+            bitmap = None
+            try:
+                page_dir = pages_dir / f"page_{index + 1:03d}"
+                page_dir.mkdir(parents=True, exist_ok=True)
+                bitmap = page.render(
+                    scale=scale,
+                    fill_color=(255, 255, 255, 255),
+                    draw_annots=True,
+                )
+                out = page_dir / "source.png"
+                with bitmap.to_pil() as image:
+                    rgb = image.convert("RGB")
+                    try:
+                        rgb.save(out)
+                    finally:
+                        rgb.close()
+                outputs.append(out)
+            finally:
+                if bitmap is not None:
+                    bitmap.close()
+                page.close()
+    finally:
+        document.close()
     return outputs
 
 
@@ -321,7 +340,7 @@ def normalize_inputs(inputs, out_root="output/image2ppt", job_dir=None, dpi=180)
                 if source_pptx != copied[0]:
                     shutil.copy2(source_pptx, input_dir / source_pptx.name)
                 rendered_pdf = convert_office_to_pdf(copied[0], tmp_dir)
-                sources = render_pdf_pages(rendered_pdf, pages_dir, args.dpi)
+                sources = render_pdf_pages(rendered_pdf, pages_dir, dpi)
         pages = [page_record(job_dir, i, source, copied[0], i) for i, source in enumerate(sources, start=1)]
     elif suffixes <= IMG_EXTS:
         input_type = "image" if len(copied) == 1 else "images"

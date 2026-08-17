@@ -12,9 +12,9 @@ Usage principles:
 
 ```text
 image2ppt                         - top-level CLI for setup, run orchestration, image assets, and formulas
-|-- setup                       - create or verify the user-level runtime home and config files
+|-- setup                       - create or verify the active runtime home and config files
 |-- doctor                      - check local runtime health, dependencies, and backend availability
-|-- config                      - write user-level OpenAI-compatible image API fallback settings
+|-- config                      - write active project/override/user API fallback settings
 |-- prepare                     - normalize image/PDF/PPTX inputs into a run directory and page jobs
 |-- run                         - advance run state and coordinate page workers
 |   |-- next                    - read current run state and return the next required action
@@ -50,7 +50,7 @@ image2ppt image edit --help
 image2ppt formula render-latex --help
 ```
 
-`image2ppt image` is the CLI fallback layer. Within that layer it automatically chooses Codex OAuth first, then OpenAI-compatible API credentials from `~/.image2ppt/config.yaml` or environment variables if OAuth is unavailable. See `manifest-schema.md` for the run/page backend field contract. `image2ppt doctor` checks CLI backend readiness; it cannot discover whether an agent runtime exposes the built-in tool.
+`image2ppt image` is the CLI fallback layer. Within that layer it automatically chooses Codex OAuth first, then OpenAI-compatible API credentials from the active `config.yaml` or environment variables if OAuth is unavailable. See `manifest-schema.md` for the run/page backend field contract. `image2ppt doctor` checks CLI backend readiness; it cannot discover whether an agent runtime exposes the built-in tool.
 
 Public `image2ppt image generate/edit` parameters are intentionally narrow. Required request inputs are `--prompt` or `--prompt-file`, plus at least one `--image` for `edit`. CLI fallback calls should pass an explicit `--out`. Retained useful controls are `--model` (default `gpt-image-2`), `--size` (default `auto`), `--quality` (default `auto`), `--force`, `--dry-run`, `--timeout`, and edit-only `--mask`. The CLI does not pass any other image API options.
 
@@ -199,7 +199,7 @@ When used with a configured PaddleOCR token, this command calls the external OCR
 image2ppt page hints pages/page_001
 ```
 
-Purpose: detect the text lines on one page's `source.png` and write `text_hints.json` (each line's source-pixel `box_px`, measured glyph height, and derived font sizes) plus `text_hints.png`, the source image with every detected line framed and labeled. `image2ppt prepare` already runs this for every page (PDF inputs are OCR'd in one batch job when a PaddleOCR token is available via the `PADDLE_OCR_TOKEN` environment variable or `~/.image2ppt/config.yaml`; otherwise the built-in offline detector runs). Use this command only to regenerate hints for a page. How to consume the hints is defined in `page-decision-tree.md` section 3.1.
+Purpose: detect the text lines on one page's `source.png` and write `text_hints.json` (each line's source-pixel `box_px`, measured glyph height, and derived font sizes) plus `text_hints.png`, the source image with every detected line framed and labeled. `image2ppt prepare` already runs this for every page (PDF inputs are OCR'd in one batch job when a PaddleOCR token is available via the `PADDLE_OCR_TOKEN` environment variable or active `config.yaml`; otherwise the built-in offline detector runs). Use this command only to regenerate hints for a page. How to consume the hints is defined in `page-decision-tree.md` section 3.1.
 
 ## Image Backend Commands
 

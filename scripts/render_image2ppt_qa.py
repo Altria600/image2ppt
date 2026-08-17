@@ -153,16 +153,35 @@ def render_libreoffice(pptx: Path, out_dir: Path, dpi: int, timeout: int) -> tup
                 "error": "LibreOffice did not create the expected PDF",
             }
         try:
-            import fitz
+            import pypdfium2 as pdfium
 
-            document = fitz.open(pdf)
+            document = pdfium.PdfDocument(str(pdf))
             rendered: list[Path] = []
             scale = dpi / 72.0
-            for index, page in enumerate(document, start=1):
-                target = out_dir / f"slide_{index:02d}.png"
-                page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False).save(target)
-                rendered.append(target)
-            document.close()
+            try:
+                for index in range(len(document)):
+                    page = document[index]
+                    bitmap = None
+                    try:
+                        target = out_dir / f"slide_{index + 1:02d}.png"
+                        bitmap = page.render(
+                            scale=scale,
+                            fill_color=(255, 255, 255, 255),
+                            draw_annots=True,
+                        )
+                        with bitmap.to_pil() as image:
+                            rgb = image.convert("RGB")
+                            try:
+                                rgb.save(target)
+                            finally:
+                                rgb.close()
+                        rendered.append(target)
+                    finally:
+                        if bitmap is not None:
+                            bitmap.close()
+                        page.close()
+            finally:
+                document.close()
         except Exception as exc:
             return [], {
                 "status": "error",
@@ -173,7 +192,7 @@ def render_libreoffice(pptx: Path, out_dir: Path, dpi: int, timeout: int) -> tup
     raw = {
         "status": "rendered" if rendered else "error",
         "renderer": "libreoffice",
-        "backend": "soffice-pdf-pymupdf",
+        "backend": "soffice-pdf-pdfium",
         "command": command,
         "stdout": proc.stdout,
         "stderr": proc.stderr,

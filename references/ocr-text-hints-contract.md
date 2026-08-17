@@ -11,8 +11,9 @@ python <image2ppt-root>/cli/image2ppt/cli.py config \
   --paddle-ocr-token "<BAIDU_AI_STUDIO_ACCESS_TOKEN>"
 ```
 
-The process environment has priority over `~/.image2ppt/config.yaml`. Never print,
-commit, or copy the token into a run.
+The process environment has priority over the active `config.yaml`, resolved as
+override directory, project-level Skill root, then legacy user-level location.
+Never print, commit, or copy the token into a run.
 
 ## Fixed network client behavior
 

@@ -166,6 +166,57 @@ def write_page_outputs(page_dir, text="Valid Page", validation_passed=True, mani
 
 
 class MultiAgentBackendTest(unittest.TestCase):
+    def test_codex_oauth_rejects_untrusted_base_url(self):
+        with mock.patch.dict(
+            os.environ,
+            {"CODEX_IMAGES_BASE_URL": "https://example.test/backend-api/codex"},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Codex OAuth credentials may only be sent"):
+                image_gen._codex_base_url()
+
+    def test_codex_oauth_accepts_only_official_https_base_url(self):
+        with mock.patch.dict(
+            os.environ,
+            {"CODEX_IMAGES_BASE_URL": "https://chatgpt.com/backend-api/codex/v1"},
+            clear=False,
+        ):
+            self.assertEqual(image_gen.DEFAULT_CODEX_IMAGES_BASE_URL, image_gen._codex_base_url())
+
+    def test_codex_oauth_post_rejects_unofficial_url_before_loading_auth(self):
+        with mock.patch.object(image_gen, "_load_codex_auth") as load_auth:
+            with self.assertRaisesRegex(RuntimeError, "official ChatGPT Images endpoint"):
+                image_gen._post_codex_image_json(
+                    "https://example.test/images/generations",
+                    {"model": "gpt-image-2", "prompt": "test"},
+                    10,
+                )
+        load_auth.assert_not_called()
+
+    def test_codex_oauth_redirect_handler_refuses_redirect(self):
+        redirect_handlers = [
+            handler
+            for handler in image_gen._CODEX_OPENER.handlers
+            if isinstance(handler, image_gen.request.HTTPRedirectHandler)
+        ]
+        self.assertEqual(
+            [image_gen._NoCodexRedirectHandler],
+            [type(handler) for handler in redirect_handlers],
+        )
+        req = image_gen.request.Request(
+            "https://chatgpt.com/backend-api/codex/images/generations"
+        )
+        handler = image_gen._NoCodexRedirectHandler()
+        with self.assertRaisesRegex(error.HTTPError, "Refusing Codex OAuth redirect"):
+            handler.redirect_request(
+                req,
+                None,
+                302,
+                "Found",
+                {},
+                "https://example.test/capture",
+            )
+
     def test_package_console_entrypoint_help(self):
         result = subprocess.run(
             [
@@ -627,31 +678,31 @@ class MultiAgentBackendTest(unittest.TestCase):
             env = os.environ.copy()
             env["CODEX_AUTH_FILE"] = str(auth)
             with mock.patch.dict(os.environ, env, clear=False), mock.patch(
-                "image2ppt.runtime.image_gen.request.urlopen",
+                "image2ppt.runtime.image_gen._open_codex_request",
                 side_effect=[http_500, FakeResponse()],
-            ) as urlopen, mock.patch("image2ppt.runtime.image_gen.time.sleep") as sleep:
+            ) as open_request, mock.patch("image2ppt.runtime.image_gen.time.sleep") as sleep:
                 response = image_gen._post_codex_image_json(
-                    "https://example.test/images/generations",
+                    "https://chatgpt.com/backend-api/codex/images/generations",
                     {"model": "gpt-image-2", "prompt": "test"},
                     10,
                 )
 
             self.assertEqual(["aW1hZ2U="], [item["b64_json"] for item in response["data"]])
-            self.assertEqual(2, urlopen.call_count)
+            self.assertEqual(2, open_request.call_count)
             sleep.assert_called_once()
 
             with mock.patch.dict(os.environ, env, clear=False), mock.patch(
-                "image2ppt.runtime.image_gen.request.urlopen",
+                "image2ppt.runtime.image_gen._open_codex_request",
                 side_effect=[error.URLError("temporary network failure"), FakeResponse()],
-            ) as urlopen, mock.patch("image2ppt.runtime.image_gen.time.sleep") as sleep:
+            ) as open_request, mock.patch("image2ppt.runtime.image_gen.time.sleep") as sleep:
                 response = image_gen._post_codex_image_json(
-                    "https://example.test/images/generations",
+                    "https://chatgpt.com/backend-api/codex/images/generations",
                     {"model": "gpt-image-2", "prompt": "test"},
                     10,
                 )
 
             self.assertEqual(["aW1hZ2U="], [item["b64_json"] for item in response["data"]])
-            self.assertEqual(2, urlopen.call_count)
+            self.assertEqual(2, open_request.call_count)
             sleep.assert_called_once()
 
             http_429 = error.HTTPError(
@@ -662,17 +713,17 @@ class MultiAgentBackendTest(unittest.TestCase):
                 fp=io.BytesIO(b"rate limit"),
             )
             with mock.patch.dict(os.environ, env, clear=False), mock.patch(
-                "image2ppt.runtime.image_gen.request.urlopen",
+                "image2ppt.runtime.image_gen._open_codex_request",
                 side_effect=http_429,
-            ) as urlopen, mock.patch("image2ppt.runtime.image_gen.time.sleep") as sleep:
+            ) as open_request, mock.patch("image2ppt.runtime.image_gen.time.sleep") as sleep:
                 with self.assertRaisesRegex(RuntimeError, r"HTTP 429"):
                     image_gen._post_codex_image_json(
-                        "https://example.test/images/generations",
+                        "https://chatgpt.com/backend-api/codex/images/generations",
                         {"model": "gpt-image-2", "prompt": "test"},
                         10,
                     )
 
-            self.assertEqual(1, urlopen.call_count)
+            self.assertEqual(1, open_request.call_count)
             sleep.assert_not_called()
 
     def test_runtime_config_writes_owner_only_yaml(self):
@@ -725,7 +776,7 @@ class MultiAgentBackendTest(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(result.stdout)
-            self.assertEqual({"fitz", "PIL", "openai", "yaml", "numpy", "requests"}, set(payload["dependencies"]))
+            self.assertEqual({"pypdfium2", "PIL", "openai", "yaml", "numpy", "requests"}, set(payload["dependencies"]))
             self.assertFalse(payload["image_backend"]["agent_builtin"]["checked"])
             self.assertIsNone(payload["image_backend"]["agent_builtin"]["ready"])
             self.assertEqual(str(ROOT), payload["skill_root"])
@@ -924,7 +975,9 @@ class MultiAgentBackendTest(unittest.TestCase):
             self.assertEqual(0, prompt.returncode, prompt.stderr)
             prompt_text = prompt_path.read_text(encoding="utf-8")
             self.assertIn(str(run_dir), prompt_text)
-            self.assertIn(str(ROOT / "./references/page-decision-tree.md"), prompt_text)
+            normalized_prompt = prompt_text.replace("\\", "/")
+            expected_reference = str(ROOT / "references/page-decision-tree.md").replace("\\", "/")
+            self.assertIn(expected_reference, normalized_prompt)
             self.assertIn("image_gen.imagegen", prompt_text)
             self.assertIn("referenced_image_paths", prompt_text)
             self.assertIn("Missing `mask`, `model`, `size`, `quality`, or `out` never triggers fallback", prompt_text)

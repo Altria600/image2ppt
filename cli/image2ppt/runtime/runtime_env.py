@@ -151,7 +151,7 @@ def config(args: argparse.Namespace) -> int:
 
 def module_status() -> dict[str, dict]:
     purposes = {
-        "fitz": "PDF input normalization and rendered-slide rasterization",
+        "pypdfium2": "PDF input normalization and rendered-slide rasterization",
         "PIL": "image normalization, assets, previews, and offline OCR geometry",
         "openai": "optional image backend",
         "yaml": "local configuration",

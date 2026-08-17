@@ -11,7 +11,7 @@ Use Python 3.10 or later and install the bundled requirements:
 python -m pip install -r <image2ppt-root>/requirements.txt
 ```
 
-Required packages are PyMuPDF, Pillow, NumPy, Requests, PyYAML, and OpenAI. The
+Required packages are pypdfium2, Pillow, NumPy, Requests, PyYAML, and OpenAI. The
 OpenAI package supports the optional image-generation fallback; OCR uses Requests.
 The builder writes OOXML directly and does not require `python-pptx`.
 
@@ -48,10 +48,10 @@ sudo apt-get install libreoffice-impress fonts-noto-cjk imagemagick
 
 ## Configuration
 
-Persistent secrets live only in `~/.image2ppt/config.yaml` (or the directory set by
-`IMAGE2PPT_CONFIG_HOME`). Process environment variables take precedence. Do not
-place a real token/key in the Skill, run directory, Prompt, manifest, report, or
-source control.
+Persistent secrets live in the active `config.yaml`: the directory selected by
+`IMAGE2PPT_CONFIG_HOME`, then the project-level Skill root, then the legacy
+`~/.image2ppt/` location. Process environment variables take precedence. Do not
+place a real token/key in a run directory, Prompt, manifest, report, or source control.
 
 Run the independent checks:
 

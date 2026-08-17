@@ -1,5 +1,5 @@
 # Complete Python runtime for the self-contained Image2PPT Skill.
-PyMuPDF>=1.24.0
+pypdfium2>=4.30.0
 Pillow>=10.0.0
 numpy>=1.26.0
 requests>=2.31.0

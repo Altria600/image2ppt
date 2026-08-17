@@ -757,8 +757,15 @@ def main():
     except Exception as exc:
         report["warnings"].append(f"Unable to read pptx: {exc}")
 
+    # Required-text validation is about semantic content, not visual line
+    # wrapping. PowerPoint stores explicit line breaks as paragraph boundaries,
+    # and vertical CJK labels may place one character per paragraph. Compare a
+    # whitespace-free form as well so editable multi-line layout does not create
+    # false missing-text failures.
+    all_text_compact = re.sub(r"\s+", "", report["all_text"])
     for text in required:
-        if text and text not in report["all_text"]:
+        text_compact = re.sub(r"\s+", "", str(text))
+        if text and text not in report["all_text"] and text_compact not in all_text_compact:
             report["missing_required_text"].append(text)
 
     provenance = {}
