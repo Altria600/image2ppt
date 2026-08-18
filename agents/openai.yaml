@@ -1,4 +1,4 @@
 interface:
   display_name: "Image2PPT"
-  short_description: "将图片高转化为对象级可编辑 PowerPoint 文件"
+  short_description: "Rebuild slide images and scans as editable PowerPoint objects"
   default_prompt: "Use $image2ppt to reconstruct these slide images as a high-fidelity editable PowerPoint and complete rendered QA."
