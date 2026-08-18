@@ -417,6 +417,87 @@ class MultiAgentBackendTest(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertTrue((page_dir / "copied-sheet.png").exists())
 
+    def test_process_sheet_accepts_absolute_asset_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            page_dir = root / "pages/page_001"
+            page_dir.mkdir(parents=True)
+            source = root / "generated-sheet.png"
+            Image.new("RGB", (24, 24), "#ff00ff").save(source)
+
+            result = run_cli(
+                "image",
+                "process-sheet",
+                page_dir,
+                "--asset-sheet-source",
+                source,
+                "--chroma",
+                "copied-sheet.png",
+                "--skip-chroma",
+                "--skip-split",
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertTrue((page_dir / "copied-sheet.png").is_file())
+
+    def test_process_sheet_rejects_output_paths_outside_page_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            page_dir = root / "pages/page_001"
+            assets_dir = page_dir / "assets"
+            assets_dir.mkdir(parents=True)
+            source = assets_dir / "sheet.png"
+            Image.new("RGB", (24, 24), "#ff00ff").save(source)
+
+            for option in ("--chroma", "--alpha", "--assets-dir", "--split-manifest"):
+                for value in (f"../outside-{option[2:]}", str(root / f"absolute-{option[2:]}")):
+                    with self.subTest(option=option, value=value):
+                        result = run_cli(
+                            "image",
+                            "process-sheet",
+                            page_dir,
+                            "--asset-sheet-source",
+                            source.relative_to(page_dir),
+                            option,
+                            value,
+                            "--skip-chroma",
+                            "--skip-split",
+                        )
+
+                        self.assertNotEqual(0, result.returncode)
+                        self.assertIn("Output path must", result.stderr)
+                        self.assertFalse((page_dir.parent / f"outside-{option[2:]}").exists())
+                        self.assertFalse((root / f"absolute-{option[2:]}").exists())
+            self.assertFalse((page_dir / "imagegen_asset_sheet_chroma.png").exists())
+
+    def test_process_sheet_rejects_unsafe_asset_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            page_dir = root / "pages/page_001"
+            assets_dir = page_dir / "assets"
+            assets_dir.mkdir(parents=True)
+            alpha = assets_dir / "sheet.png"
+            Image.new("RGBA", (64, 64), (0, 0, 0, 255)).save(alpha)
+
+            unsafe_names = ("../../escaped", "..\\..\\escaped", "nested/escaped", str(root / "absolute-escaped"))
+            for name in unsafe_names:
+                with self.subTest(name=name):
+                    result = run_cli(
+                        "image",
+                        "process-sheet",
+                        page_dir,
+                        "--alpha",
+                        alpha.relative_to(page_dir),
+                        "--skip-chroma",
+                        "--asset-names",
+                        name,
+                    )
+
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("safe filename components", result.stderr)
+            self.assertFalse((page_dir.parent / "escaped.png").exists())
+            self.assertFalse((root / "absolute-escaped.png").exists())
+
     def test_process_sheet_scopes_default_outputs_by_job_id(self):
         with tempfile.TemporaryDirectory() as tmp:
             page_dir = Path(tmp) / "pages/page_001"

@@ -6,10 +6,23 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 
-def parse_names(value):
+def parse_names(value, option="--names"):
     if not value:
         return []
-    return [item.strip() for item in value.split(",") if item.strip()]
+    names = [item.strip() for item in value.split(",") if item.strip()]
+    for name in names:
+        path = Path(name)
+        if (
+            "\x00" in name
+            or "/" in name
+            or "\\" in name
+            or name in {".", ".."}
+            or path.is_absolute()
+            or path.drive
+            or path.name != name
+        ):
+            raise SystemExit(f"{option} entries must be safe filename components: {name}")
+    return names
 
 
 NEIGHBORS = {

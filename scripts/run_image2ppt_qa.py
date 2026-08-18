@@ -155,7 +155,7 @@ def main() -> int:
         "schema_version": "image2ppt-supplemental-page-qa-v1",
         "passed": passed,
         "page_dir": str(page_dir),
-        "state_owner": "image2ppt/page_jobs.json",
+        "state_owner": "page_jobs.json",
         "manifest": str(manifest),
         "pptx": str(pptx),
         "visual_review": {

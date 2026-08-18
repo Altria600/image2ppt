@@ -110,8 +110,10 @@ class ManifestArrowTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             validation = json.loads((page / "validation.json").read_text(encoding="utf-8"))
+            report = json.loads((page / "image2ppt_qa.json").read_text(encoding="utf-8"))
             self.assertTrue(validation["passed"])
             self.assertTrue(validation["image2ppt_profile"]["passed"])
+            self.assertEqual(report["state_owner"], "page_jobs.json")
             self.assertTrue((page / "render" / "rendered.png").is_file())
             self.assertFalse((page / "render" / "slide_01.png").exists())
 
@@ -159,6 +161,7 @@ class ManifestArrowTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             report = json.loads((run / "final" / "image2ppt_qa.json").read_text(encoding="utf-8"))
             self.assertTrue(report["passed"], report)
+            self.assertEqual(report["state_owner"], "page_jobs.json")
             self.assertTrue(report["checks"]["image2ppt_validation"]["passed"])
             self.assertEqual(len(report["checks"]["page_diff_metrics"]), 1)
             self.assertFalse((run / "final" / "image2ppt_render" / "rendered.png").exists())

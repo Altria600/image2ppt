@@ -170,7 +170,7 @@ def main() -> int:
     report = {
         "schema_version": "image2ppt-supplemental-final-qa-v1",
         "passed": passed,
-        "state_owner": "image2ppt/page_jobs.json",
+        "state_owner": "page_jobs.json",
         "pptx": str(pptx),
         "manifests": [str(path) for path in manifests],
         "visual_review": {"status": args.visual_review_status, "notes": args.visual_review_notes},

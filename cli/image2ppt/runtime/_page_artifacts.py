@@ -4,6 +4,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from deck_run_state import resolve_inside
+from split_alpha_components import parse_names as parse_asset_names
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -13,11 +16,21 @@ def run(command):
     subprocess.run([str(part) for part in command], check=True)
 
 
-def resolve_under_page(page_dir, value):
+def resolve_input_path(page_dir, value):
     path = Path(value).expanduser()
     if path.is_absolute():
         return path
     return page_dir / path
+
+
+def resolve_output_path(page_dir, value):
+    raw = Path(value).expanduser()
+    if raw.is_absolute() or raw.drive:
+        raise SystemExit(f"Output path must be relative to page_dir: {value}")
+    try:
+        return resolve_inside(page_dir, raw)
+    except ValueError as exc:
+        raise SystemExit(f"Output path must stay inside page_dir: {value}") from exc
 
 
 def imagegen_chroma_helper():
@@ -28,8 +41,11 @@ def imagegen_chroma_helper():
 
 
 def process_asset_sheet(args, page_dir):
-    chroma = resolve_under_page(page_dir, args.chroma)
-    alpha = resolve_under_page(page_dir, args.alpha)
+    parse_asset_names(args.asset_names, "--asset-names")
+    chroma = resolve_output_path(page_dir, args.chroma)
+    alpha = resolve_output_path(page_dir, args.alpha)
+    assets_dir = resolve_output_path(page_dir, args.assets_dir)
+    split_manifest = resolve_output_path(page_dir, args.split_manifest)
     if not args.asset_sheet_source and not chroma.exists() and not alpha.exists():
         return
     if not args.asset_sheet_source and args.skip_chroma and args.skip_split:
@@ -39,7 +55,7 @@ def process_asset_sheet(args, page_dir):
         raise SystemExit(f"Output already exists: {alpha} (use --force-chroma to overwrite)")
 
     if args.asset_sheet_source:
-        source = resolve_under_page(page_dir, args.asset_sheet_source)
+        source = resolve_input_path(page_dir, args.asset_sheet_source)
         if not source.exists():
             raise SystemExit(f"Asset sheet source does not exist: {source}")
         chroma.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +97,7 @@ def process_asset_sheet(args, page_dir):
         "--input",
         alpha,
         "--out-dir",
-        resolve_under_page(page_dir, args.assets_dir),
+        assets_dir,
         "--sort",
         args.split_sort,
         "--min-area",
@@ -91,7 +107,7 @@ def process_asset_sheet(args, page_dir):
         "--merge-union-growth",
         args.split_merge_union_growth,
         "--manifest",
-        resolve_under_page(page_dir, args.split_manifest),
+        split_manifest,
     ]
     if args.square_assets:
         command.append("--square")
