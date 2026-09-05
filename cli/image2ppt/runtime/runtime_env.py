@@ -244,6 +244,8 @@ def internal_resource_status() -> dict:
         "qa_contract": SKILL_ROOT / "references" / "qa-contract.md",
         "dependency_contract": SKILL_ROOT / "references" / "runtime-dependencies.md",
         "asset_contract": SKILL_ROOT / "references" / "assets-provenance-contract.md",
+        "typography_contract": SKILL_ROOT / "references" / "typography-alignment-contract.md",
+        "source_fidelity_contract": SKILL_ROOT / "references" / "source-fidelity-style-contract.md",
     }
     files = {key: {"path": str(path), "exists": path.is_file()} for key, path in required.items()}
     return {"ready": all(item["exists"] for item in files.values()), "files": files}

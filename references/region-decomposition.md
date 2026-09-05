@@ -9,7 +9,7 @@ state, and the page `manifest.json` remains the only build source.
 Do not route a whole page object-by-object without first understanding its
 semantic modules.
 
-1. Divide a structured page into 3-5 semantic regions.  A genuinely simple
+1. Divide a structured page into 3-8 semantic regions.  A genuinely simple
    page may use 1-2 regions.
 2. Inventory every meaningful object inside each region before authoring it.
 3. Route the region and its objects:

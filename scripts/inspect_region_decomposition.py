@@ -116,8 +116,8 @@ def validate_manifest(manifest: dict[str, Any], manifest_path: Path) -> dict[str
     if not isinstance(regions, list) or not regions:
         errors.append("regions must be a non-empty list")
         regions = []
-    if complexity == "structured" and not 3 <= len(regions) <= 5:
-        errors.append("structured pages require 3-5 semantic regions")
+    if complexity == "structured" and not 3 <= len(regions) <= 8:
+        errors.append("structured pages require 3-8 semantic regions")
     if complexity == "simple" and not 1 <= len(regions) <= 2:
         errors.append("simple pages require 1-2 semantic regions")
 

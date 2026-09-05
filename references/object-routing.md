@@ -4,7 +4,7 @@ The local `references/page-decision-tree.md` is authoritative for background rec
 
 ## Region decision order
 
-1. Divide a structured page into 3-5 semantic regions before authoring objects.
+1. Divide a structured page into 3-8 semantic regions before authoring objects.
 2. Identify compound diagrams and position-sensitive modules.
 3. Inventory and measure the simple objects in each region in source pixels.
 4. Choose `native-object-decomposition`, `mixed-reconstruction`, `bounded-local-asset`, or `native-text-layout` for the region.

@@ -1,6 +1,6 @@
 ---
 name: image2ppt
-description: Convert slide images, screenshots, scanned PDFs, and image-only PPT/PPTX files into high-fidelity object-level editable PowerPoint, including semantic-region mixed reconstruction, measured flowcharts and knowledge graphs, native circle nodes and connectors, single-object thin and filled arrows, speaker-note preservation, and rendered QA. Use for 图片转可编辑PPT、截图还原PPT、扫描PDF恢复、图片型PPTX转换、流程图/知识图谱/复合图形/箭头重建; not for authoring a new deck from notes.
+description: Convert slide images, screenshots, scanned PDFs, and image-only PPT/PPTX files into high-fidelity object-level editable PowerPoint with measured structure, governed typography, source-faithful assets, and rendered QA. Use for 图片转可编辑PPT、截图还原PPT、扫描PDF恢复、图片型PPTX转换、流程图/知识图谱/复合图形/箭头重建; not for authoring a new deck from notes.
 ---
 
 # Image2PPT
@@ -34,6 +34,8 @@ Before reconstructing a page, also read:
 - `references/object-routing.md`
 - `references/manifest-arrow-extension.md`
 - `references/assets-provenance-contract.md`
+- `references/typography-alignment-contract.md`
+- `references/source-fidelity-style-contract.md`
 
 Before accepting or delivering output, read `references/qa-contract.md`.
 
@@ -103,7 +105,17 @@ agent. For multiple pages, dispatch independent page workers up to the capacity 
 
 ### 4. Reconstruct and gate each page
 
-Plan a structured page as 3–5 semantic regions and route each region independently.
+Before drawing, inventory text roles, shared styles, alignment rails, and one
+visual style anchor for the page. Set `typography_policy: governed` in new
+manifests, then record repeated text with `text_style_id` and
+`alignment_group`/`role` when those rails are present. The governed builder
+never changes authored typography to hide overflow; manifests without the new
+policy retain legacy fitting for migration compatibility. Follow
+`references/typography-alignment-contract.md` for fitting and render checks,
+and `references/source-fidelity-style-contract.md` for PDF structure,
+visible-source composition, and asset/style decisions.
+
+Plan a structured page as 3–8 semantic regions and route each region independently.
 Use measured compound diagrams: measure every node, relation, and protected anchor. Keep measurable
 circles, cards, straight/dashed relations, and simple connectors native. Use bounded
 transparent assets only for complex local subparts.

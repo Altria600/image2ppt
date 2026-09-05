@@ -1,4 +1,4 @@
 interface:
   display_name: "Image2PPT"
-  short_description: "Rebuild slide images and scans as editable PowerPoint objects"
-  default_prompt: "Use $image2ppt to reconstruct these slide images as a high-fidelity editable PowerPoint and complete rendered QA."
+  short_description: "Rebuild slide images and PDFs as editable PowerPoint objects"
+  default_prompt: "Use $image2ppt to reconstruct these slide images or PDFs as a high-fidelity editable PowerPoint, govern repeated typography and alignment, and complete rendered QA."

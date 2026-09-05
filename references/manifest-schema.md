@@ -233,10 +233,42 @@ Missing coordinates are page-contract violations. The runtime must reject them d
 
 Text-size fitting:
 
-- `text_boxes[].font_size` is treated as the requested font size. The deterministic builder may clamp it downward during normalization when the requested size is too large for the resolved source-pixel box.
-- Keep default fitting enabled for first drafts. Set `fit_text: false` only when the page author has manually calibrated the box and font size.
-- `text_boxes[].box_px` should describe the source text bounds plus modest padding. Do not use an entire card, chart, table cell group, or unrelated container as the text box, because the fitter can only infer size from the box it receives.
-- Optional tuning fields are `min_font_size`, `max_font_size`, `text_fit_safety`, and `line_height`.
+- `text_boxes[].font_size` is the authored font size in points. The deterministic
+  builder preserves it during normalization when the manifest sets
+  `typography_policy: governed`; it never silently shrinks governed text to
+  hide overflow.
+- `text_boxes[].box_px` should describe the source text bounds plus modest
+  padding. Do not use an entire card, chart, table cell group, or unrelated
+  container as the text box, because the validator can only infer fit from the
+  box it receives.
+- When text is too long, introduce semantic line breaks, adjust the box or
+  layout, and only then consider applying a smaller size to the complete
+  same-level style/alignment group. Run page validation after rebuilding; an
+  estimated overflow is a contract failure.
+- Set `typography_policy: governed` for new pages. In this mode `fit_text` does
+  not enable per-box shrinking; optional measurement fields such as
+  `min_font_size`, `max_font_size`, `text_fit_safety`, and `line_height` are
+  advisory inputs to the deterministic overflow estimate. A missing policy is
+  treated as legacy and retains the pre-existing builder fit behavior so old
+  manifests continue to migrate.
+- `governed` is the only accepted explicit policy value. A misspelled or other
+  value is a contract failure. Using `text_style_id` or `alignment_group`
+  without the governed policy is also a failure; omit all three fields only
+  when migrating a genuinely legacy manifest.
+
+Typography and alignment governance:
+
+- Optional `text_style_id` identifies one shared text style. Every text item
+  using the same id must keep the same font and font size; keep `line_height`
+  consistent for the same level as well. The validator reports drift.
+- Optional `alignment_group` names a shared source-pixel alignment rail, and
+  optional `role` distinguishes anchors such as `number`, `title`, and `body`.
+  Items with the same group and role must keep the same x anchor, font, and
+  font size. Use separate groups for distinct columns. Number-frame shapes
+  sharing a group and role must use matching shape geometry and dimensions.
+- These fields are optional so manifests created before this contract remain
+  compatible. See `references/typography-alignment-contract.md` for the
+  inventory, wrapping, and render-review workflow.
 
 Text alignment:
 

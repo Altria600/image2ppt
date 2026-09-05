@@ -50,13 +50,31 @@ For every profiled manifest arrow:
 
 Machine inspection proves object structure, not visual fidelity.
 
+## Typography and alignment inspection
+
+`image2ppt page validate` audits the optional `text_style_id` and
+`alignment_group`/`role` fields without changing the manifest. It rejects:
+
+- one `text_style_id` used with different fonts, font sizes, or line heights;
+- same-group, same-role text with a drifting source-pixel x anchor, font, or
+  font size;
+- same-group, same-role number frames with a drifting source-pixel x anchor or
+  different native geometry/size; use separate roles for a number frame and
+  its editable label;
+- a governed (`typography_policy: governed`) text box whose authored size is
+  estimated to overflow its measured box.
+
+Older manifests without the policy or governance fields retain legacy fitting
+and remain compatible. Governed overflow is repaired by semantic wrapping,
+box/layout adjustment, or a complete same-level size change before record.
+
 ## Region and compound-diagram inspection
 
 `inspect_region_decomposition.py` validates the in-manifest
 `image2ppt_region_decomposition` block against standard object ids and source
 coordinates. It rejects:
 
-- a structured page without 3-5 semantic regions;
+- a structured page without 3-8 semantic regions;
 - region references to missing manifest objects;
 - manifest objects that were never assigned to a semantic region;
 - a high-risk region without protected visual anchors;
@@ -78,6 +96,8 @@ Compare `source.png` with the actual PowerPoint/LibreOffice render at matching a
 - compound diagram node count, centers, sizes, circle geometry, connector endpoints, direction, dash rhythm, labels, and z-order;
 - filled-arrow silhouette and embedded-label centering;
 - composition, text hierarchy, line breaks, font fallback, assets, formula rendering, missing objects, and duplicate source text;
+- typography inventory, same-level font/size/line-height consistency, alignment
+  group anchors, number-frame geometry, and governed text overflow;
 - no full-slide source image or source reuse masquerades as a render.
 
 Specific review notes are mandatory. A generic phrase such as "looks good" is not sufficient evidence.

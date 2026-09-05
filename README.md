@@ -20,6 +20,8 @@
 - 🏢 **复杂商业 PPT**：还原密集时间线、多层流程、卡片、图标和复合箭头，同时保持版式与对象可编辑。
 - 🔬 **复杂科研流程图**：逐节点、逐关系重建知识图谱和科研框架，保留圆形节点、连接线、箭头及局部结构。
 - ✏️ **对象级可编辑**：文字、形状、节点、连接线和箭头均可独立选择，不使用整页截图充当伪可编辑底图。
+- 📐 **版式一致性治理**：用 `text_style_id`、`alignment_group` 和 `role` 记录重复文字与编号框的字号、字体、行距和对齐锚点，并在 QA 中报告漂移与溢出。
+- 🧾 **源稿保真**：PDF 优先利用可提取的真文字和矢量结构；复杂插画保留为独立、有来源记录的局部资产，并用统一的视觉风格锚点校准。
 - ✅ **双重质量优势**：在下方展示的同源案例对比中，Image2PPT 的清晰度表现最佳，细节还原度最高。
 
 下面第一行展示复杂商业 PPT，第二行展示复杂科研图；两组“原图 / 转换图”组成 2×2 对照。转换图中的选框用于证明对象可以独立编辑，不会出现在放映模式中。
@@ -74,11 +76,11 @@
 
 #### Codex
 
-> 我的 PaddleOCR Token 是 `<PADDLE_OCR_TOKEN>`。请从 `https://github.com/Paul-Jeo/Image2PPT` 将完整项目安装为当前项目的 `.agents/skills/image2ppt` Skill。安装 `requirements.txt` 中的依赖，将 `config.example.yaml` 复制为同目录的 `config.yaml`，仅把 Token 写入该文件，不要回显或提交。补齐 `doctor` 报告的系统依赖，最后运行 `doctor --json`，确认 `config_scope` 为 `project`、PaddleOCR Token 状态为 `set`。
+> 我的 PaddleOCR Token 是 `<PADDLE_OCR_TOKEN>`。请从 `https://github.com/Altria600/image2ppt` 将完整项目安装为当前项目的 `.agents/skills/image2ppt` Skill。安装 `requirements.txt` 中的依赖，将 `config.example.yaml` 复制为同目录的 `config.yaml`，仅把 Token 写入该文件，不要回显或提交。补齐 `doctor` 报告的系统依赖，最后运行 `doctor --json`，确认 `config_scope` 为 `project`、PaddleOCR Token 状态为 `set`。
 
 #### Claude Code
 
-> 我的 PaddleOCR Token 是 `<PADDLE_OCR_TOKEN>`。请从 `https://github.com/Paul-Jeo/Image2PPT` 将完整项目安装为当前项目的 `.claude/skills/image2ppt` Skill。安装 `requirements.txt` 中的依赖，将 `config.example.yaml` 复制为同目录的 `config.yaml`，仅把 Token 写入该文件，不要回显或提交。补齐 `doctor` 报告的系统依赖，最后运行 `doctor --json`，确认 `config_scope` 为 `project`、PaddleOCR Token 状态为 `set`。
+> 我的 PaddleOCR Token 是 `<PADDLE_OCR_TOKEN>`。请从 `https://github.com/Altria600/image2ppt` 将完整项目安装为当前项目的 `.claude/skills/image2ppt` Skill。安装 `requirements.txt` 中的依赖，将 `config.example.yaml` 复制为同目录的 `config.yaml`，仅把 Token 写入该文件，不要回显或提交。补齐 `doctor` 报告的系统依赖，最后运行 `doctor --json`，确认 `config_scope` 为 `project`、PaddleOCR Token 状态为 `set`。
 
 ### 3. 配置说明
 
@@ -90,8 +92,11 @@
 
 - 用于还原已有视觉页面，不用于根据笔记、论文或提纲从零创作演示文稿。
 - 复杂插图、照片和无法可靠测量的局部效果可能保留为独立图片资产，不保证所有元素都转换为原生形状。
-- 低分辨率输入和缺失字体会限制还原精度；在线 OCR 会向百度服务上传当前任务页面，敏感材料应使用离线模式。
+- 低分辨率输入和缺失字体会限制还原精度；输出以源稿对比和实际渲染 QA 为准，不承诺所有页面达到像素级一致。
+- 在线 OCR 会向百度服务上传当前任务页面，敏感材料应使用离线模式。
 
 ## License
 
 本项目采用 [MIT License](LICENSE)。
+
+本定制版基于上游 [Paul-Jeo/Image2PPT](https://github.com/Paul-Jeo/Image2PPT)，保留原项目版权与许可证。

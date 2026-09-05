@@ -164,10 +164,16 @@ Do not guess font sizes or positions by eye — `image2ppt prepare` already meas
 
 - Match each detected line in the overlay image to the text you read in the source.
 - Copy the measured `box_px` and the matching font size column (`font_pt_if_cjk` for CJK text, `font_pt_if_latin` for Latin) into the corresponding `text_boxes` item.
-- Add `"font_size_source": "measured"` to every box sized this way — the deterministic builder then trusts the measured size instead of applying its conservative shrink, which otherwise makes text systematically smaller than the source.
+- Add `"font_size_source": "measured"` to every box sized this way. Set
+  `"typography_policy": "governed"` in a new manifest so the deterministic
+  builder preserves that authored size and lets QA report overflow. A manifest
+  without the policy retains the legacy fitter for migration compatibility.
 - Hints are advisory and incomplete by design. Fill lines the detector missed and correct lines it merged with a graphic or labeled implausibly (a box sitting on an icon or photo) from your own reading of the source — a missed hint never means the text can be dropped.
 - Same-level text uses exactly one font size: lines sharing a `size_group` get the same size, hand-added text joins the size group of its level, and the final page keeps same-level text identical even where individual measurements disagree slightly.
-- Keep deterministic runtime fitting (`fit_text`) enabled as the overflow guard; tuning fields and when to disable it are in `manifest-schema.md`.
+- In governed manifests, use the validator's deterministic fit estimate as the
+  overflow guard; repair semantic wrapping or the box before changing a whole
+  same-level group. The legacy `fit_text` fitter remains only for manifests
+  without the governed policy.
 - After building a preview, compare text by level against the source; do not enlarge titles, body text, or labels by default. If any level looks larger, heavier, more crowded, or wraps more than the source, fix the font size or box before continuing.
 
 Record completed calibration with `quality_checks.font_size_calibrated=true`.

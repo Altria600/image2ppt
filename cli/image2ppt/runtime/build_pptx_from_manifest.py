@@ -290,6 +290,15 @@ def scale_run_font_sizes(item, ratio):
 
 
 def fit_text_item(item, manifest):
+    """Normalize text while preserving governed typography.
+
+    Older manifests do not have a typography policy and retain the original
+    fit behavior for migration compatibility. New manifests set
+    ``typography_policy: governed``; those keep the authored size intact so QA
+    can report overflow instead of hiding it with a per-box shrink.
+    """
+    if str(manifest.get("typography_policy", "")).strip().lower() == "governed":
+        return item
     fitted = fitted_font_size(item, manifest)
     if fitted is None:
         return item

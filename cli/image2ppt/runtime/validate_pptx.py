@@ -8,7 +8,12 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from build_pptx_from_manifest import TEXT_ALIGNMENTS, TEXT_VERTICAL_ALIGNMENTS, normalize_manifest
+from build_pptx_from_manifest import (
+    TEXT_ALIGNMENTS,
+    TEXT_VERTICAL_ALIGNMENTS,
+    fitted_font_size,
+    normalize_manifest,
+)
 
 
 NS = {
@@ -266,7 +271,271 @@ def page_contract_violations(manifest):
     return violations
 
 
-def quality_contract_violations(manifest):
+def _iter_text_items(manifest, include_shapes=True):
+    """Yield text-bearing manifest items with stable report locations."""
+    for section in ("text_boxes", "shapes") if include_shapes else ("text_boxes",):
+        for index, item in enumerate(manifest.get(section, [])):
+            if not isinstance(item, dict):
+                continue
+            has_text = (
+                item.get("text") not in (None, "")
+                or item.get("runs")
+                or item.get("paragraphs")
+            )
+            if section == "shapes" and not has_text:
+                continue
+            if (
+                has_text
+                or "text_style_id" in item
+                or "alignment_group" in item
+            ):
+                yield f"{section}[{index}]", item
+
+
+def _number(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
+
+
+def _item_x(item):
+    box = item.get("box_px")
+    if isinstance(box, (list, tuple)) and len(box) == 4:
+        return _number(box[0])
+    return _number(item.get("left"))
+
+
+def _item_font_values(item, manifest=None):
+    default_font = item.get("font", "PingFang SC")
+    fonts = [str(default_font).strip().casefold()]
+    default_size = item.get("font_size", 18)
+    sizes = [_number(default_size)]
+    manifest_line_height = (manifest or {}).get("text_line_height", 1.22)
+    line_heights = [_number(item.get("line_height", manifest_line_height))]
+    runs = item.get("runs") or []
+    for paragraph in item.get("paragraphs") or []:
+        if isinstance(paragraph, dict):
+            runs = [*runs, *(paragraph.get("runs") or [])]
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        fonts.append(str(run.get("font", default_font)).strip().casefold())
+        sizes.append(_number(run.get("font_size", default_size)))
+        line_heights.append(_number(run.get("line_height", item.get("line_height", manifest_line_height))))
+    return (
+        tuple(sorted(set(fonts))),
+        tuple(sorted(set(sizes), key=lambda value: (value is None, value))),
+        tuple(sorted(set(line_heights), key=lambda value: (value is None, value))),
+    )
+
+
+def _shape_geometry_signature(item):
+    box = item.get("box_px")
+    if not isinstance(box, (list, tuple)) or len(box) != 4:
+        return None
+    width = _number(box[2])
+    height = _number(box[3])
+    if width is None or height is None:
+        return None
+    corner_value = item.get("source_corner_radius_px")
+    if corner_value is None:
+        corner_value = item.get("radius")
+    corner = _number(corner_value)
+    rotation = _number(item.get("rotation", 0))
+    return (
+        str(item.get("type", "rect")),
+        str(item.get("preset", "")),
+        round(width, 4),
+        round(height, 4),
+        None if corner is None else round(corner, 4),
+        0 if rotation is None else round(rotation, 4),
+    )
+
+
+def style_alignment_contract_violations(manifest, normalized_manifest=None):
+    """Audit optional typography styles and alignment rails in a manifest.
+
+    The fields are optional so manifests produced before this contract remain
+    valid. Once a page opts into a style or alignment group, the checks are
+    deterministic and report the offending manifest item instead of changing
+    it during build.
+    """
+    violations = []
+    text_items = list(_iter_text_items(manifest))
+    policy_value = manifest.get("typography_policy")
+    policy = str(policy_value).strip().lower() if policy_value is not None else ""
+    governance_used = any(
+        item.get("text_style_id") is not None or item.get("alignment_group") is not None
+        for _, item in text_items
+    ) or any(
+        isinstance(shape, dict) and shape.get("alignment_group") is not None
+        for shape in manifest.get("shapes", [])
+    )
+    if policy_value is not None and policy != "governed":
+        violations.append(
+            {
+                "field": "typography_policy",
+                "reason": "typography_policy must be 'governed' when present; omit it only for legacy manifests",
+            }
+        )
+    elif governance_used and policy != "governed":
+        violations.append(
+            {
+                "field": "typography_policy",
+                "reason": "text_style_id and alignment_group require typography_policy: governed",
+            }
+        )
+
+    style_seen = {}
+    alignment_groups = {}
+    for location, item in text_items:
+        style_id = item.get("text_style_id")
+        if style_id is not None:
+            field = f"{location}.text_style_id"
+            if not isinstance(style_id, str) or not style_id.strip():
+                violations.append({"field": field, "reason": "text_style_id must be a non-empty string"})
+            else:
+                signature = _item_font_values(item, manifest)
+                previous = style_seen.get(style_id)
+                if previous and previous["signature"] != signature:
+                    violations.append(
+                        {
+                            "field": field,
+                            "reason": (
+                                f"text_style_id {style_id!r} changes font, font size, or line height; "
+                                f"expected {previous['signature']}, got {signature}"
+                            ),
+                        }
+                    )
+                else:
+                    style_seen.setdefault(style_id, {"location": location, "signature": signature})
+
+        group = item.get("alignment_group")
+        if group is not None:
+            field = f"{location}.alignment_group"
+            if not isinstance(group, str) or not group.strip():
+                violations.append({"field": field, "reason": "alignment_group must be a non-empty string"})
+            else:
+                role = item.get("role", "default") or "default"
+                alignment_groups.setdefault((group, str(role)), []).append((location, item))
+
+    for (group, role), members in alignment_groups.items():
+        if len(members) < 2:
+            continue
+        first_item = members[0][1]
+        first_x = _item_x(first_item)
+        first_signature = _item_font_values(first_item, manifest)
+        for location, item in members[1:]:
+            current_x = _item_x(item)
+            if first_x is None or current_x is None:
+                violations.append(
+                    {
+                        "field": f"{location}.box_px",
+                        "reason": f"alignment_group {group!r} role {role!r} needs a measurable x anchor",
+                    }
+                )
+            elif abs(current_x - first_x) > 1e-6:
+                violations.append(
+                    {
+                        "field": f"{location}.box_px[0]",
+                        "reason": (
+                            f"alignment_group {group!r} role {role!r} x anchor drifts "
+                            f"from {first_x:g} to {current_x:g} source pixels"
+                        ),
+                    }
+                )
+            current_signature = _item_font_values(item, manifest)
+            if current_signature != first_signature:
+                violations.append(
+                    {
+                        "field": f"{location}.font_size",
+                        "reason": (
+                            f"alignment_group {group!r} role {role!r} changes font, font size, or line height "
+                            f"from {first_signature} to {current_signature}"
+                        ),
+                    }
+                )
+
+    shape_groups = {}
+    for index, shape in enumerate(manifest.get("shapes", [])):
+        if not isinstance(shape, dict) or shape.get("alignment_group") is None:
+            continue
+        group = shape.get("alignment_group")
+        if not isinstance(group, str) or not group.strip():
+            continue
+        role = shape.get("role", "default") or "default"
+        signature = _shape_geometry_signature(shape)
+        if signature is not None:
+            shape_groups.setdefault((group, str(role)), []).append((index, _item_x(shape), signature))
+    for (group, role), members in shape_groups.items():
+        _, expected_x, expected = members[0]
+        for index, current_x, signature in members[1:]:
+            if expected_x is None or current_x is None:
+                violations.append(
+                    {
+                        "field": f"shapes[{index}].box_px",
+                        "reason": f"alignment_group {group!r} role {role!r} needs a measurable x anchor",
+                    }
+                )
+            elif abs(current_x - expected_x) > 1e-6:
+                violations.append(
+                    {
+                        "field": f"shapes[{index}].box_px[0]",
+                        "reason": (
+                            f"alignment_group {group!r} role {role!r} x anchor drifts "
+                            f"from {expected_x:g} to {current_x:g} source pixels"
+                        ),
+                    }
+                )
+            if signature != expected:
+                violations.append(
+                    {
+                        "field": f"shapes[{index}].alignment_group",
+                        "reason": (
+                            f"alignment_group {group!r} role {role!r} requires identical shape geometry; "
+                            f"expected {expected}, got {signature}"
+                        ),
+                    }
+                )
+
+    if normalized_manifest is None:
+        try:
+            normalized_manifest = normalize_manifest(manifest)
+        except Exception:
+            normalized_manifest = None
+    governed_typography = (
+        normalized_manifest is not None
+        and str(normalized_manifest.get("typography_policy", "")).strip().lower() == "governed"
+    )
+    if governed_typography:
+        for location, item in _iter_text_items(normalized_manifest):
+            requested = _number(item.get("font_size", 18))
+            if requested is None or "width" not in item or "height" not in item:
+                continue
+            probe = dict(item)
+            probe["fit_text"] = True
+            # The validator reports the geometric limit itself; an authored
+            # minimum is useful for legacy fitting but must not waive a
+            # governed overflow.
+            probe["min_font_size"] = 0
+            fit_limit = fitted_font_size(probe, normalized_manifest)
+            if fit_limit is not None and requested > fit_limit + 1e-6:
+                violations.append(
+                    {
+                        "field": f"{location}.font_size",
+                        "reason": (
+                            f"authored font size {requested:g}pt exceeds the estimated {fit_limit:g}pt "
+                            "box limit; wrap text or adjust the box and size as a group"
+                        ),
+                    }
+                )
+
+    return violations
+
+
+def quality_contract_violations(manifest, normalized_manifest=None):
     violations = []
 
     if "visual_inventory" not in manifest:
@@ -341,6 +610,7 @@ def quality_contract_violations(manifest):
             )
 
     violations.extend(foreground_asset_contract_violations(manifest))
+    violations.extend(style_alignment_contract_violations(manifest, normalized_manifest))
     return violations
 
 
@@ -527,7 +797,7 @@ def validate_deck(args):
                 violations = (
                     authoring_violations
                     + page_contract_violations(normalized_manifest)
-                    + quality_contract_violations(raw_manifest)
+                    + quality_contract_violations(raw_manifest, normalized_manifest)
                 )
                 if violations:
                     report["page_contract_violations"].append(
@@ -808,7 +1078,9 @@ def main():
         if not source_path.exists():
             report["missing_provenance_sources"].append({"path": key, "source": str(source)})
     report["page_contract_violations"] = (
-        authoring_violations + page_contract_violations(manifest) + quality_contract_violations(raw_manifest)
+        authoring_violations
+        + page_contract_violations(manifest)
+        + quality_contract_violations(raw_manifest, manifest)
     )
 
     report["passed"] = (

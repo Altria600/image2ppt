@@ -101,7 +101,28 @@ class SlideLayoutTest(unittest.TestCase):
         self.assertEqual("custom", slide_size_type(emu(16), emu(10.6666667)))
         self.assertEqual("screen16x9", slide_size_type(emu(13.333), emu(7.5)))
 
-    def test_text_font_size_is_clamped_to_source_box(self):
+    def test_text_font_size_is_preserved_for_qa_to_audit(self):
+        manifest = {
+            "source": {"width_px": 1600, "height_px": 900},
+            "slide": {"width": 13.333, "height": 7.5},
+            "content_box": {"left": 0, "top": 0, "width": 13.333, "height": 7.5},
+            "typography_policy": "governed",
+            "text_boxes": [
+                {
+                    "text": "Dense label",
+                    "box_px": [100, 100, 260, 24],
+                    "font_size": 24,
+                }
+            ],
+        }
+
+        normalized = normalize_manifest(manifest)
+        text_box = normalized["text_boxes"][0]
+
+        self.assertEqual(24, text_box["font_size"])
+        self.assertNotIn("_requested_font_size", text_box)
+
+    def test_legacy_text_fit_remains_available_without_typography_policy(self):
         manifest = {
             "source": {"width_px": 1600, "height_px": 900},
             "slide": {"width": 13.333, "height": 7.5},
@@ -116,10 +137,9 @@ class SlideLayoutTest(unittest.TestCase):
         }
 
         normalized = normalize_manifest(manifest)
-        text_box = normalized["text_boxes"][0]
 
-        self.assertLess(text_box["font_size"], 24)
-        self.assertEqual(24, text_box["_requested_font_size"])
+        self.assertLess(normalized["text_boxes"][0]["font_size"], 24)
+        self.assertEqual(24, normalized["text_boxes"][0]["_requested_font_size"])
 
     def test_text_font_size_fit_can_be_disabled(self):
         manifest = {

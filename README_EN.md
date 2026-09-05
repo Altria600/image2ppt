@@ -20,6 +20,8 @@ Simple image-to-PPT pages are no longer the hard part. The real challenge is a c
 - 🏢 **Complex business slides**: Reconstruct dense timelines, layered processes, cards, icons, and compound arrows while keeping the layout and objects editable.
 - 🔬 **Complex scientific flowcharts**: Rebuild knowledge graphs and scientific frameworks node by node and relation by relation, preserving circles, connectors, arrows, and local structures.
 - ✏️ **Object-level editability**: Keep text, shapes, nodes, connectors, and arrows independently selectable instead of using a full-slide screenshot as a pseudo-editable background.
+- 📐 **Typography and alignment governance**: Use `text_style_id`, `alignment_group`, and `role` to record shared fonts, sizes, line heights, and source-pixel rails, then reject drift or overflow during QA.
+- 🧾 **Source fidelity**: Prefer extractable PDF text and vector structure, preserve complex visuals as independent provenance-tracked local assets, and calibrate generated assets against one visual style anchor.
 - ✅ **Two quality advantages**: In the like-for-like examples shown below, Image2PPT delivers the best clarity and the highest detail fidelity.
 
 The first row below shows a complex business slide and the second a complex scientific figure; together, the two source/result pairs form a 2×2 comparison. Selection handles in converted screenshots demonstrate editable objects and do not appear in slide-show mode.
@@ -75,11 +77,11 @@ Replace the token placeholder in the matching instruction, then give the whole b
 
 #### Codex
 
-> My PaddleOCR Token is `<PADDLE_OCR_TOKEN>`. Fetch the complete project from `https://github.com/Paul-Jeo/Image2PPT` and install it as `.agents/skills/image2ppt` in the current project. Install the dependencies from `requirements.txt`, copy `config.example.yaml` to `config.yaml` in the same directory, and write the Token only to that file without echoing or committing it. Install any system dependencies reported by `doctor`, then run `doctor --json` and confirm that `config_scope` is `project` and the PaddleOCR Token status is `set`.
+> My PaddleOCR Token is `<PADDLE_OCR_TOKEN>`. Fetch the complete project from `https://github.com/Altria600/image2ppt` and install it as `.agents/skills/image2ppt` in the current project. Install the dependencies from `requirements.txt`, copy `config.example.yaml` to `config.yaml` in the same directory, and write the Token only to that file without echoing or committing it. Install any system dependencies reported by `doctor`, then run `doctor --json` and confirm that `config_scope` is `project` and the PaddleOCR Token status is `set`.
 
 #### Claude Code
 
-> My PaddleOCR Token is `<PADDLE_OCR_TOKEN>`. Fetch the complete project from `https://github.com/Paul-Jeo/Image2PPT` and install it as `.claude/skills/image2ppt` in the current project. Install the dependencies from `requirements.txt`, copy `config.example.yaml` to `config.yaml` in the same directory, and write the Token only to that file without echoing or committing it. Install any system dependencies reported by `doctor`, then run `doctor --json` and confirm that `config_scope` is `project` and the PaddleOCR Token status is `set`.
+> My PaddleOCR Token is `<PADDLE_OCR_TOKEN>`. Fetch the complete project from `https://github.com/Altria600/image2ppt` and install it as `.claude/skills/image2ppt` in the current project. Install the dependencies from `requirements.txt`, copy `config.example.yaml` to `config.yaml` in the same directory, and write the Token only to that file without echoing or committing it. Install any system dependencies reported by `doctor`, then run `doctor --json` and confirm that `config_scope` is `project` and the PaddleOCR Token status is `set`.
 
 ### 3. Configuration Notes
 
@@ -91,8 +93,11 @@ If the Token is unavailable or network OCR fails, Image2PPT falls back to `built
 
 - Reconstructs existing visual pages; it does not author a new presentation from notes, papers, or outlines.
 - Complex illustrations, photos, and local effects that cannot be measured reliably may remain independent image assets; not every element is guaranteed to become a native shape.
-- Low-resolution sources and missing fonts limit fidelity. Online OCR uploads current task pages to Baidu services, so sensitive material should use offline mode.
+- Low-resolution sources and missing fonts limit fidelity. Acceptance depends on source comparison and actual rendered QA; not every page can be guaranteed pixel-identical.
+- Online OCR uploads current task pages to Baidu services, so sensitive material should use offline mode.
 
 ## License
 
 Released under the [MIT License](LICENSE).
+
+This customized distribution is based on [Paul-Jeo/Image2PPT](https://github.com/Paul-Jeo/Image2PPT) and preserves the upstream copyright and license.

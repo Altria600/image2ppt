@@ -224,8 +224,8 @@ def glyph_em_ratio(text: str) -> float:
     These are calibration constants: CJK glyphs nearly fill the em box, Latin
     cap height is ~0.72 em, descenders extend the band to ~0.92 em, and
     lowercase-only words without ascenders sit near the x-height (~0.50 em).
-    The deterministic builder's fit_text clamp and `page diff` absorb the
-    residual error.
+    The deterministic validator's governed overflow estimate and `page diff`
+    absorb the residual error.
     """
     if not text:
         return 0.72
