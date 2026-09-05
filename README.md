@@ -6,6 +6,7 @@
   <p>把图片型幻灯片、扫描 PDF、图片型 PPT/PPTX 重建成对象级可编辑 PowerPoint</p>
   <p>
     <a href="https://github.com/Altria600/image2ppt/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Altria600/image2ppt/actions/workflows/ci.yml/badge.svg"></a>
+    <a href="#快速开始"><img alt="Install" src="https://img.shields.io/badge/install-Claude%20Code%20%7C%20Codex-8b5cf6"></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-2ea44f"></a>
     <a href="README_EN.md"><img alt="Language" src="https://img.shields.io/badge/language-中文%20%7C%20English-1f6feb"></a>
     <img alt="Version" src="https://img.shields.io/badge/version-1.2.0-8b5cf6">
@@ -28,7 +29,7 @@ Image2PPT 面向需要保留原稿版式的图片转 PPTX 场景。它把源稿�
 
 复杂视觉保留为独立图片，并不等于整页不可编辑。文字、卡片、连接线和可测量结构仍然会拆开输出。
 
-## 工作流
+### 工作流
 
 ```mermaid
 flowchart LR
@@ -77,7 +78,7 @@ python .agents/skills/image2ppt/cli/image2ppt/cli.py prepare input.pdf --out-roo
 
 ## 配置
 
-`config.yaml` 只用于本地机器，已被 Git 忽略；不要把 Token 或 API Key 写入仓库。
+`config.yaml` 只用于本地机器，已被 Git 忽略；不要把 Token 或 API Key 写入仓库。需要手动配置时，可从 `config.example.yaml` 复制模板；如果要指定其他配置目录，可设置 `IMAGE2PPT_CONFIG_HOME`。
 
 ### 可选的在线 OCR
 
@@ -144,7 +145,7 @@ IMAGE2PPT_IMAGE_MODEL: "供应商提供的模型 ID"
 
 <p align="center"><img src="assets/readme/detail-comparison.png" alt="复杂流程图细节还原对比" width="100%"></p>
 
-## 项目结构
+### 项目结构
 
 ```text
 SKILL.md                         # Agent 使用说明与页面生命周期
@@ -163,7 +164,7 @@ python3 -m pytest -q
 
 当前仓库的完整测试结果为 `177 passed`。渲染 QA 仍应在实际使用的 PowerPoint 或 WPS 中复核，因为不同平台的字体回退和绘制引擎可能不同。
 
-## 边界
+### 边界
 
 - 本项目用于还原已有视觉页面，不用于根据笔记或提纲从零创作演示文稿。
 - 复杂插图、照片和无法可靠测量的效果可能保留为独立图片，不能承诺所有像素都变成原生形状。
