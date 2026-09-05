@@ -28,6 +28,17 @@ def base_manifest():
     }
 
 
+def v2_manifest():
+    manifest = base_manifest()
+    manifest["schema_version"] = 2
+    manifest["typography_policy"] = "governed"
+    manifest["quality_evidence"] = {
+        key: {"observation": f"Verified {key} against the source image and current render."}
+        for key in manifest["quality_checks"]
+    }
+    return manifest
+
+
 class QualityContractTest(unittest.TestCase):
     def test_quality_checks_are_required(self):
         violations = quality_contract_violations({})
@@ -112,6 +123,71 @@ class QualityContractTest(unittest.TestCase):
         ]
         self.assertEqual([], quality_contract_violations(manifest))
 
+    def test_structured_native_item_avoids_benchmark_substring_false_positive(self):
+        manifest = v2_manifest()
+        manifest["visual_inventory"] = [
+            {
+                "id": "benchmark_panel",
+                "kind": "native-structure",
+                "representation": "native",
+                "description": "benchmark result panel",
+            }
+        ]
+        self.assertEqual([], quality_contract_violations(manifest))
+
+    def test_structured_foreground_item_cannot_hide_behind_background_word(self):
+        manifest = v2_manifest()
+        manifest["visual_inventory"] = [
+            {
+                "id": "icon",
+                "kind": "foreground-asset",
+                "representation": "native",
+                "description": "foreground icon over background",
+            }
+        ]
+        reasons = " ".join(item["reason"] for item in quality_contract_violations(manifest))
+        self.assertIn("foreground-asset requires", reasons)
+
+    def test_unrendered_formula_is_a_hard_failure_without_user_approval(self):
+        manifest = v2_manifest()
+        manifest["formula_inventory"] = [
+            {"id": "f1", "status": "failed", "tex_source": "assets/f1.tex"}
+        ]
+        reasons = " ".join(item["reason"] for item in quality_contract_violations(manifest))
+        self.assertIn("hard failure", reasons)
+
+    def test_formula_visual_requires_formula_inventory(self):
+        manifest = v2_manifest()
+        manifest["visual_inventory"] = [
+            {
+                "id": "f1",
+                "kind": "formula",
+                "representation": "latex-rendered-formula",
+                "path": "assets/f1.svg",
+            }
+        ]
+        reasons = " ".join(item["reason"] for item in quality_contract_violations(manifest))
+        self.assertIn("matching formula_inventory", reasons)
+
+    def test_user_approved_formula_exception_requires_and_accepts_concrete_note(self):
+        manifest = v2_manifest()
+        manifest["formula_inventory"] = [
+            {
+                "id": "f1",
+                "status": "failed",
+                "tex_source": "assets/f1.tex",
+                "user_approved_exception": True,
+                "approval_note": "User explicitly approved delivery without this secondary formula.",
+            }
+        ]
+        self.assertEqual([], quality_contract_violations(manifest))
+
+    def test_v2_quality_booleans_require_specific_evidence(self):
+        manifest = v2_manifest()
+        manifest["quality_evidence"]["visual_inventory_matched"] = {"observation": "checked"}
+        fields = [item["field"] for item in quality_contract_violations(manifest)]
+        self.assertIn("quality_evidence.visual_inventory_matched.observation", fields)
+
     def test_round_rect_writes_ooxml_adjustment(self):
         xml = shape_xml(
             2,
@@ -163,6 +239,7 @@ class QualityContractTest(unittest.TestCase):
 
     def test_same_text_style_id_rejects_font_or_size_drift(self):
         manifest = base_manifest()
+        manifest["typography_policy"] = "governed"
         manifest["text_boxes"] = [
             {
                 "text": "标题一",
@@ -186,6 +263,7 @@ class QualityContractTest(unittest.TestCase):
 
     def test_alignment_group_rejects_x_and_typography_drift(self):
         manifest = base_manifest()
+        manifest["typography_policy"] = "governed"
         manifest["text_boxes"] = [
             {
                 "text": "编号",
@@ -213,6 +291,7 @@ class QualityContractTest(unittest.TestCase):
 
     def test_alignment_group_number_frames_require_matching_geometry(self):
         manifest = base_manifest()
+        manifest["typography_policy"] = "governed"
         manifest["shapes"] = [
             {
                 "type": "roundRect",
@@ -236,6 +315,7 @@ class QualityContractTest(unittest.TestCase):
 
     def test_alignment_group_number_frames_reject_x_drift(self):
         manifest = base_manifest()
+        manifest["typography_policy"] = "governed"
         manifest["shapes"] = [
             {
                 "type": "roundRect",
@@ -259,6 +339,7 @@ class QualityContractTest(unittest.TestCase):
 
     def test_number_frame_does_not_enter_text_typography_rail(self):
         manifest = base_manifest()
+        manifest["typography_policy"] = "governed"
         manifest["text_boxes"] = [
             {
                 "text": "01",
@@ -313,6 +394,14 @@ class QualityContractTest(unittest.TestCase):
     def test_unknown_typography_policy_is_rejected(self):
         manifest = base_manifest()
         manifest["typography_policy"] = "goverened"
+
+        violations = quality_contract_violations(manifest)
+
+        self.assertTrue(any(item["field"] == "typography_policy" for item in violations))
+
+    def test_v2_manifest_requires_governed_policy(self):
+        manifest = v2_manifest()
+        del manifest["typography_policy"]
 
         violations = quality_contract_violations(manifest)
 
