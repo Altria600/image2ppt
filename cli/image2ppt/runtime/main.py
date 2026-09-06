@@ -27,6 +27,8 @@ from formula_renderer import (
     render_latex_asset,
     write_json,
 )
+from runtime_env import ALLOWED_IMAGE_BACKENDS
+from vector_assets import VectorAssetError, trace_raster_to_svg, validate_svg
 
 
 RUNTIME_DIR = Path(__file__).resolve().parent
@@ -43,7 +45,7 @@ def cli_prog() -> str:
 
 
 def print_json(payload: dict) -> int:
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0
 
 
@@ -57,6 +59,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         argv.append("--json")
     if args.timeout is not None:
         argv.extend(["--timeout", str(args.timeout)])
+    if getattr(args, "image_backend", None):
+        argv.extend(["--image-backend", args.image_backend])
+    if getattr(args, "check_codex", False):
+        argv.append("--check-codex")
+    if getattr(args, "allow_remote_ocr", False):
+        argv.append("--allow-remote-ocr")
     return run_script("runtime_env.py", argv)
 
 
@@ -116,6 +124,13 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_prepare(args: argparse.Namespace) -> int:
+    from configure_image_backend import backend_contract, configured_model
+
+    # Validate the selected contract before creating any run directory.
+    backend_contract(argparse.Namespace(
+        backend_id=args.image_backend, model=configured_model() or None,
+        tool_name=getattr(args, "tool_name", None), tool_call=getattr(args, "tool_call", None),
+    ))
     argv = []
     if args.out_root:
         argv.extend(["--out-root", args.out_root])
@@ -145,14 +160,17 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     if not getattr(args, "no_text_hints", False):
         # Best-effort: distribute per-page text measurements alongside the
         # page sources so workers start with hints already in place.
-        if run_script("deck_text_hints.py", [str(deck_path.parent)]) != 0:
+        hints_args = [str(deck_path.parent)]
+        if getattr(args, "allow_remote_ocr", False):
+            hints_args.append("--allow-remote-ocr")
+        if run_script("deck_text_hints.py", hints_args) != 0:
             print("warning: text hints generation failed; workers can run `image2ppt page hints` per page", file=sys.stderr)
     return cmd_backend(
         argparse.Namespace(
             run=str(deck_path.parent),
             mode=args.image_backend,
-            tool_name=None,
-            tool_call=None,
+            tool_name=getattr(args, "tool_name", None),
+            tool_call=getattr(args, "tool_call", None),
             model=None,
             fallback_command=None,
             runtime_home=None,
@@ -200,6 +218,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_next(args: argparse.Namespace) -> int:
+    command_prefix = [sys.executable, str(RUNTIME_DIR.parent / "cli.py")]
     run_dir = run_dir_from_target(args.run)
     deck = load_deck(run_dir)
     jobs = load_jobs(run_dir)
@@ -214,16 +233,31 @@ def cmd_next(args: argparse.Namespace) -> int:
             "run_dir": str(run_dir),
             "stage": "configure_backend",
             "next_command": f"{cli_prog()} run backend {run_dir}",
+            "next_argv": [*command_prefix, "run", "backend", str(run_dir)],
             "reason": "deck_manifest.json.image_backend is missing",
             "agent_focus": "No page reconstruction yet. Confirm the image backend first.",
         }
         return print_json(payload) if args.json else _print_next_text(payload)
 
+    if getattr(args, "local", False):
+        active = next((page for page in pages if page.get("status") == "dispatched"
+                       and (page.get("dispatch") or {}).get("agent_id") == "main"), None)
+        if active:
+            payload = {
+                "run_dir": str(run_dir), "stage": "resume_page_locally",
+                "page_id": active["page_id"], "page_dir": str(page_dir_for(run_dir, active)),
+                "next_command": f"{cli_prog()} run status {run_dir}",
+                "next_argv": [*command_prefix, "run", "status", str(run_dir)],
+                "agent_focus": "Continue the active local page and record or reset it before claiming another page.",
+            }
+            return print_json(payload) if args.json else _print_next_text(payload)
+
     if dispatchable and slots > 0:
         selected = dispatchable[:slots]
         first_page = find_page(jobs, selected[0])
         prompt_out = page_dir_for(run_dir, first_page) / "worker-prompt.md"
-        if len(pages) == 1 and selected == [first_page.get("page_id")]:
+        if getattr(args, "local", False) or (len(pages) == 1 and selected == [first_page.get("page_id")]):
+            selected = selected[:1]
             payload = {
                 "run_dir": str(run_dir),
                 "stage": "rebuild_page_locally",
@@ -232,6 +266,7 @@ def cmd_next(args: argparse.Namespace) -> int:
                 "suggested_pages": selected,
                 "prompt_file": str(prompt_out),
                 "next_command": f"{cli_prog()} run dispatch {run_dir} --page {selected[0]} --agent-id main --prompt-file {prompt_out} --local",
+                "next_argv": [*command_prefix, "run", "dispatch", str(run_dir), "--page", selected[0], "--agent-id", "main", "--prompt-file", str(prompt_out), "--local"],
                 "agent_focus": "Build the page prompt, claim local execution with dispatch --local, rebuild the page yourself using that prompt, then record the result.",
             }
             return print_json(payload) if args.json else _print_next_text(payload)
@@ -243,6 +278,7 @@ def cmd_next(args: argparse.Namespace) -> int:
             "suggested_pages": selected,
             "prompt_file": str(prompt_out),
             "next_command": f"{cli_prog()} run dispatch {run_dir} --page {selected[0]} --agent-id <worker-id> --prompt-file {prompt_out}",
+            "next_argv": [*command_prefix, "run", "dispatch", str(run_dir), "--page", selected[0], "--agent-id", "<worker-id>", "--prompt-file", str(prompt_out)],
             "agent_focus": "Build the page prompt, spawn the worker, then record dispatch.",
         }
         return print_json(payload) if args.json else _print_next_text(payload)
@@ -258,6 +294,7 @@ def cmd_next(args: argparse.Namespace) -> int:
             "stage": "wait",
             "active_or_unfinished_pages": unfinished,
             "next_command": f"{cli_prog()} run status {run_dir}",
+            "next_argv": [*command_prefix, "run", "status", str(run_dir)],
             "agent_focus": "Wait for dispatched workers, then record completed page results. Do not reset slow active workers; use `run reset` only after failure, terminal state, cancellation, or lost-worker verification.",
         }
         return print_json(payload) if args.json else _print_next_text(payload)
@@ -267,6 +304,7 @@ def cmd_next(args: argparse.Namespace) -> int:
         "stage": "finalize",
         "run_status": state.get("status"),
         "next_command": f"{cli_prog()} run finalize {run_dir}",
+        "next_argv": [*command_prefix, "run", "finalize", str(run_dir)],
         "agent_focus": "All pages are recorded. Build and validate the final PPTX.",
     }
     return print_json(payload) if args.json else _print_next_text(payload)
@@ -414,6 +452,70 @@ def cmd_formula_render_latex(args: argparse.Namespace) -> int:
         return 1
 
 
+def _vector_page_dir(args: argparse.Namespace) -> Path | None:
+    value = getattr(args, "page_dir_flag", None) or getattr(args, "page_dir", None)
+    return Path(value).expanduser().resolve() if value else None
+
+
+def _vector_trace_values(args: argparse.Namespace) -> tuple[str, str, Path | None]:
+    positional = list(getattr(args, "trace_paths", []) or [])
+    page_dir = _vector_page_dir(args)
+    input_value = args.input
+    output_value = args.out
+    if input_value is None and output_value is None:
+        if len(positional) == 2:
+            input_value, output_value = positional
+        elif len(positional) == 3:
+            page_dir, input_value, output_value = Path(positional[0]).expanduser().resolve(), positional[1], positional[2]
+    elif input_value is None and len(positional) == 1:
+        input_value = positional[0]
+    elif output_value is None and len(positional) == 1:
+        output_value = positional[0]
+    elif input_value is not None and output_value is not None and len(positional) == 1:
+        page_dir = Path(positional[0]).expanduser().resolve()
+    if input_value is None or output_value is None:
+        raise VectorAssetError("vector trace requires --input and --out (or INPUT OUTPUT positionals)")
+    if positional and len(positional) not in {1, 2, 3}:
+        raise VectorAssetError("vector trace accepts PAGE_DIR, INPUT, and OUTPUT positionals only")
+    return str(input_value), str(output_value), page_dir
+
+
+def cmd_vector_trace(args: argparse.Namespace) -> int:
+    try:
+        input_value, output_value, page_dir = _vector_trace_values(args)
+        output = trace_raster_to_svg(
+            input_value,
+            output_value,
+            force=args.force,
+            page_dir=page_dir,
+            source_path=args.source,
+            box_px=args.box,
+            fragment_path=args.fragment,
+            image_id=args.id,
+            alt=args.alt,
+            z_index=args.z_index,
+        )
+        return print_json(output)
+    except (VectorAssetError, ValueError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
+def cmd_vector_validate(args: argparse.Namespace) -> int:
+    path_value = args.path
+    if args.page_dir_flag:
+        try:
+            path_value = str(page_local_path(Path(args.page_dir_flag).expanduser().resolve(), path_value, "SVG input"))
+        except SystemExit as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    try:
+        return print_json(validate_svg(Path(path_value)))
+    except (ValueError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=os.environ.get("IMAGE2PPT_CLI_PROG", "image2ppt"),
@@ -426,6 +528,7 @@ def build_parser() -> argparse.ArgumentParser:
   - page measures text geometry: hints reports text line boxes and font sizes from source ink.
   - image is the Codex OAuth/OpenAI-compatible CLI fallback and processes image files.
   - formula renders LaTeX formulas into PPT image assets and manifest fragments.
+  - vector traces local raster assets to trusted SVG images and validates that subset.
 
 Examples:
   image2ppt setup
@@ -433,12 +536,14 @@ Examples:
   image2ppt run next <run> --json
   image2ppt run finalize <run>
   image2ppt formula render-latex pages/page_001 --tex "\\frac{a}{b}" --out assets/formula.svg --box 100,100,300,80 --fragment formula-fragment.json
+  image2ppt vector trace pages/page_001 --input assets/isolated-icon.png --out assets/icon.svg --source source.png --box 100,100,300,200 --fragment icon-fragment.json
 
 Use '<command> --help' for exact arguments:
   image2ppt prepare --help
   image2ppt run --help
   image2ppt image --help
   image2ppt formula render-latex --help
+  image2ppt vector --help
 """,
     )
     sub = parser.add_subparsers(dest="command", metavar="command", required=True)
@@ -483,6 +588,9 @@ Agent-only image_gen.imagegen tool and does not perform a network API probe.
     doctor.add_argument("--check-ocr", action="store_true", help="Require a configured PaddleOCR token without performing a network request.")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     doctor.add_argument("--timeout", type=int, help="Reserved timeout value for future network probes.")
+    doctor.add_argument("--image-backend", choices=sorted(ALLOWED_IMAGE_BACKENDS), help="Inspect an explicit image backend without making a network request.")
+    doctor.add_argument("--check-codex", action="store_true", help="Explicitly inspect legacy Codex OAuth availability.")
+    doctor.add_argument("--allow-remote-ocr", action="store_true", help="Report authorized PaddleOCR selection; doctor never uploads pages.")
     doctor.set_defaults(func=cmd_doctor)
 
     config = sub.add_parser(
@@ -507,7 +615,7 @@ variables still win at runtime. API keys are masked in command output.
     config.add_argument("--model", help="Default provider image model id.")
     config.add_argument(
         "--image-backend",
-        choices=["auto", "codex-oauth", "openai-compatible-api"],
+        choices=sorted(ALLOWED_IMAGE_BACKENDS),
         help="Default transport backend for image generate/edit calls.",
     )
     config.add_argument("--image-user-agent", help="Optional User-Agent for the OpenAI-compatible API only.")
@@ -526,7 +634,7 @@ variables still win at runtime. API keys are masked in command output.
 
 This command creates the run directory, copies inputs, writes deck/page manifests,
 extracts note metadata when applicable, and records the selected image backend
-contract. The standalone CLI default is image2ppt-image-cli.
+contract. The standalone CLI default is local-only and does not upload inputs.
 """,
         formatter_class=HELP_FORMATTER,
         epilog="""Examples:
@@ -543,14 +651,17 @@ contract. The standalone CLI default is image2ppt-image-cli.
     prepare.add_argument("--max-concurrent-pages", type=int, metavar="N", help="Maximum concurrent page dispatch slots. Default: 6.")
     prepare.add_argument(
         "--image-backend",
-        choices=["builtin-imagegen", "image2ppt-image-cli", "openai-compatible-api"],
-        default="image2ppt-image-cli",
+        choices=sorted(ALLOWED_IMAGE_BACKENDS - {"auto"}),
+        default="local-only",
         help=(
-            "Run-level image backend contract. Defaults to image2ppt-image-cli; use openai-compatible-api "
-            "to pin a provider-neutral OpenAI Images-compatible transport."
+            "Run-level image backend contract. Defaults to local-only; declare a host tool explicitly "
+            "or select an authorized image API when a page needs image editing."
         ),
     )
     prepare.add_argument("--no-text-hints", action="store_true", help="Skip per-page text hint generation after preparing pages.")
+    prepare.add_argument("--allow-remote-ocr", action="store_true", help="Authorize uploading this run's input pages to configured PaddleOCR.")
+    prepare.add_argument("--tool-name", help="Explicit host image tool name for host-image-tool.")
+    prepare.add_argument("--tool-call", help="Explicit host image tool call for host-image-tool.")
     prepare.set_defaults(func=cmd_prepare)
 
     run = sub.add_parser(
@@ -573,6 +684,7 @@ record dispatch/result events, and assemble the final deck.
     )
     run_next.add_argument("run", metavar="RUN", help="Run directory or deck_manifest.json path.")
     run_next.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    run_next.add_argument("--local", action="store_true", help="Suggest sequential main-agent reconstruction when subagents are unavailable.")
     run_next.set_defaults(func=cmd_next)
 
     status = run_sub.add_parser(
@@ -590,8 +702,8 @@ record dispatch/result events, and assemble the final deck.
         help="Override the run image backend contract.",
         description="""Configure deck_manifest.json.image_backend and copy it into page requests.
 
-Normally image2ppt prepare records the unified image2ppt image CLI backend automatically.
-Use this when a parent Agent selects image_gen.imagegen or when forcing other backend metadata.
+Normally image2ppt prepare records local-only. Use this to explicitly declare a host
+tool, import external results, or select an authorized image API. No automatic fallback.
 """,
         formatter_class=HELP_FORMATTER,
         epilog="""Examples:
@@ -603,9 +715,9 @@ Use this when a parent Agent selects image_gen.imagegen or when forcing other ba
     backend.add_argument("run", metavar="RUN", help="Run directory or deck_manifest.json path.")
     backend.add_argument(
         "--mode",
-        choices=["builtin-imagegen", "image2ppt-image-cli", "openai-compatible-api"],
-        default="image2ppt-image-cli",
-        help="Image backend mode. Defaults to the unified image2ppt image CLI contract.",
+        choices=sorted(ALLOWED_IMAGE_BACKENDS - {"auto"}),
+        default="local-only",
+        help="Image backend mode. Defaults to local-only.",
     )
     backend.add_argument("--tool-name", metavar="NAME", help="Override the tool name for non-builtin contracts.")
     backend.add_argument("--tool-call", metavar="CALL", help="Override the tool call for non-builtin contracts.")
@@ -618,7 +730,7 @@ Use this when a parent Agent selects image_gen.imagegen or when forcing other ba
     dispatch = run_sub.add_parser(
         "dispatch",
         help="Record page dispatch.",
-        description="Mark a page as dispatched after a worker/thread has been created, or after the main agent claims a single-page run with --local.",
+        description="Mark a page as dispatched to a worker or claimed for sequential main-agent reconstruction with --local.",
         formatter_class=HELP_FORMATTER,
     )
     dispatch.add_argument("run", metavar="RUN", help="Run directory or deck_manifest.json path.")
@@ -626,7 +738,7 @@ Use this when a parent Agent selects image_gen.imagegen or when forcing other ba
     dispatch.add_argument("--agent-id", required=True, metavar="ID", help="Runtime worker/thread id.")
     dispatch.add_argument("--prompt-file", required=True, metavar="FILE", help="Prompt file used to spawn the worker. It must resolve inside the page directory.")
     dispatch.add_argument("--agent-nickname", metavar="NAME", help="Optional human-readable worker label.")
-    dispatch.add_argument("--local", action="store_true", help="Claim a single-page run for main-agent local reconstruction instead of spawning a worker.")
+    dispatch.add_argument("--local", action="store_true", help="Claim one page locally, also supported for multi-page runs.")
     dispatch.set_defaults(func=cmd_dispatch)
 
     record = run_sub.add_parser(
@@ -662,9 +774,12 @@ Use this when a parent Agent selects image_gen.imagegen or when forcing other ba
     run_hints.add_argument("run", metavar="RUN", help="Run directory or deck_manifest.json path.")
     run_hints.add_argument("--timeout", type=int, default=300, help="OCR job timeout in seconds.")
     run_hints.add_argument("--no-overlay", action="store_true", help="Skip the labeled overlay images.")
+    run_hints.add_argument("--allow-remote-ocr", action="store_true", help="Authorize this run's page uploads to configured PaddleOCR.")
     run_hints.set_defaults(func=lambda args: run_script(
         "deck_text_hints.py",
-        [args.run, "--timeout", str(args.timeout)] + (["--no-overlay"] if args.no_overlay else []),
+        [args.run, "--timeout", str(args.timeout)]
+        + (["--no-overlay"] if args.no_overlay else [])
+        + (["--allow-remote-ocr"] if args.allow_remote_ocr else []),
     ))
 
     finalize = run_sub.add_parser(
@@ -726,6 +841,68 @@ PowerPoint, not an editable equation object.
     formula_render.add_argument("--alt", metavar="TEXT", help="Alt text for the formula image in the manifest fragment.")
     formula_render.add_argument("--z-index", type=int, default=220, metavar="N", help="Image z_index in the manifest fragment.")
     formula_render.set_defaults(func=cmd_formula_render_latex)
+
+    vector = sub.add_parser(
+        "vector",
+        help="Trace local raster assets to SVG and validate the trusted SVG subset.",
+        description="""Local vector asset tools.
+
+`trace` uses the optional local VTracer Python package and never uploads the
+input. It accepts only local raster input. The output is an SVG picture asset
+(`svg-image`), not a claim of native PowerPoint path editability.
+
+`validate` accepts svg/g/path/rect/circle/ellipse/line/polyline/polygon,
+inline fills/strokes/opacity, and affine transforms. It rejects text, raster
+images, scripts, event handlers, foreignObject, external/url references, and
+unsupported SVG elements.
+""",
+        formatter_class=HELP_FORMATTER,
+    )
+    vector_sub = vector.add_subparsers(dest="vector_command", metavar="vector-command", required=True)
+
+    vector_trace = vector_sub.add_parser(
+        "trace",
+        help="Trace one local raster image to an SVG asset and optional manifest fragment.",
+        description="""Trace a local raster image with VTracer.
+
+When PAGE_DIR is supplied, --out and --fragment must stay inside it. Use
+--source to identify the original page/source image and --box to preserve the
+source-pixel geometry of a bounded object in the generated fragment. --box is
+metadata only: isolate the raster object first; it does not crop --input.
+
+Examples:
+  image2ppt vector trace pages/page_001 --input assets/isolated-icon.png --source source.png --out assets/icon.svg --fragment icon-fragment.json --box 100,100,300,200
+  image2ppt vector trace input.png output.svg --force
+""",
+        formatter_class=HELP_FORMATTER,
+    )
+    vector_trace.add_argument(
+        "trace_paths",
+        nargs="*",
+        metavar="PATH",
+        help="Optional PAGE_DIR, or INPUT OUTPUT when --input/--out are omitted.",
+    )
+    vector_trace.add_argument("--page-dir", dest="page_dir_flag", metavar="DIR", help="Page directory used for path confinement.")
+    vector_trace.add_argument("--input", metavar="FILE", help="Local raster input image.")
+    vector_trace.add_argument("--out", "--output", dest="out", metavar="FILE", help="SVG output path.")
+    vector_trace.add_argument("--force", action="store_true", help="Allow replacing an existing SVG and fragment.")
+    vector_trace.add_argument("--source", metavar="FILE", help="Original page/source path recorded in provenance.")
+    vector_trace.add_argument("--box", metavar="X,Y,W,H", help="Bounded source-pixel box recorded as image/provenance geometry.")
+    vector_trace.add_argument("--fragment", metavar="FILE", help="Optional JSON fragment containing images and asset_provenance.")
+    vector_trace.add_argument("--id", metavar="ID", help="Image id in the fragment; defaults to the output stem.")
+    vector_trace.add_argument("--alt", metavar="TEXT", help="Alt text in the fragment.")
+    vector_trace.add_argument("--z-index", type=int, default=220, metavar="N", help="Image z_index in the fragment.")
+    vector_trace.set_defaults(func=cmd_vector_trace)
+
+    vector_validate = vector_sub.add_parser(
+        "validate",
+        help="Validate one SVG against the trusted local vector subset.",
+        description="Validate an SVG without executing or fetching any content.",
+        formatter_class=HELP_FORMATTER,
+    )
+    vector_validate.add_argument("path", metavar="SVG", help="SVG file to validate.")
+    vector_validate.add_argument("--page-dir", dest="page_dir_flag", metavar="DIR", help="Resolve SVG relative to this page directory and enforce confinement.")
+    vector_validate.set_defaults(func=cmd_vector_validate)
 
     page = sub.add_parser(
         "page",
@@ -789,32 +966,31 @@ comparison image.
         help="Generate/edit images and process image assets.",
         description="""Unified image generation/editing and deterministic image-file handling.
 
-Use generate/edit with an explicit or configured transport backend. In auto mode,
-Codex OAuth is selected only for GPT Image model ids; provider-specific model ids
-use the OpenAI Images-compatible API. Use process-sheet for deterministic asset-
-sheet splitting inside page directories.
+Default auto/local-only does not call image services or inspect Codex credentials.
+Use generate/edit with an explicit remote backend and --allow-remote after the
+user authorizes its inputs and cost. The Agent invokes host-native tools itself;
+import records their selected local output. process-sheet splits local assets.
 """,
         formatter_class=HELP_FORMATTER,
         epilog="""Backend selection:
-  auto uses Codex OAuth only for GPT Image model ids with compatible auth.
-  codex-oauth explicitly uses ~/.codex/auth.json or CODEX_AUTH_FILE.
+  auto resolves to local-only, including when API credentials are configured.
+  codex-oauth explicitly uses legacy Codex authentication, only when selected.
   openai-compatible-api explicitly uses the active config.yaml or OPENAI_API_KEY,
   OPENAI_BASE_URL, and IMAGE2PPT_IMAGE_MODEL. Third-party endpoints never receive
   Codex OAuth credentials.
 
-Setup:
-  codex login
+Optional API configuration (configuration alone does not authorize a call):
   image2ppt config --api-key "your-api-key" --image-backend openai-compatible-api --base-url https://example.test/v1 --model provider-image-model
 
 Parameter surface:
   generate/edit backend requests always pass model and prompt. Explicit non-auto
   size and quality values are forwarded unchanged. edit also passes input images
   and an optional mask. Local controls such as --backend, --out, --force,
-  --dry-run, and --timeout are not image API parameters.
+  --dry-run, --allow-remote, and --timeout are not image API parameters.
 
 Patterns:
-  image2ppt image edit --image pages/page_001/source.png --prompt-file clean-base.prompt.txt --out pages/page_001/assets/clean-base.png
-  image2ppt image edit --image pages/page_001/source.png --prompt-file asset-sheet.prompt.txt --out pages/page_001/assets/asset-sheet.png
+  image2ppt image edit --backend openai-compatible-api --model provider-image-model --image pages/page_001/source.png --prompt-file clean-base.prompt.txt --out pages/page_001/assets/clean-base.png --dry-run
+  After bounded user authorization, replace --dry-run with --allow-remote.
 """,
     )
     image_sub = image.add_subparsers(dest="image_command", metavar="image-command", required=True)

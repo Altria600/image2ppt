@@ -38,7 +38,7 @@ def main():
     parser.add_argument("--agent-id", required=True)
     parser.add_argument("--agent-nickname")
     parser.add_argument("--prompt-file", required=True)
-    parser.add_argument("--local", action="store_true", help="Claim a single-page run for main-agent local reconstruction.")
+    parser.add_argument("--local", action="store_true", help="Claim one page for local reconstruction, including sequential multi-page runs.")
     args = parser.parse_args()
 
     run_dir = run_dir_from_target(args.run)
@@ -51,8 +51,14 @@ def main():
 
     if page.get("status") != "pending":
         raise SystemExit(f"{page['page_id']} must be pending before dispatch; got {page.get('status')}")
-    if args.local and len(jobs.get("pages", [])) != 1:
-        raise SystemExit("--local dispatch is only allowed when the run has exactly one page")
+    if args.local:
+        active = [
+            item for item in jobs.get("pages", [])
+            if item.get("status") == "dispatched"
+            and item.get("dispatch", {}).get("agent_id") == args.agent_id
+        ]
+        if active:
+            raise SystemExit("Finish or reset the agent's active page before claiming another local page")
 
     page_request = (run_dir / page["page_request"]).resolve()
     if not page_request.exists():

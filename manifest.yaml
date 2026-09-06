@@ -1,17 +1,19 @@
 name: image2ppt
-version: 1.2.0
+version: 1.3.0
 description: >
-  Self-contained Image2PPT runtime for reconstructing slide images, scanned PDFs,
-  and image-only PPTX files as object-level editable PowerPoint with rendered QA.
+  Portable, local-first Image2PPT runtime for Codex and WorkBuddy, reconstructing
+  existing pages as native PowerPoint objects and faithful SVG/raster assets.
 
 source:
-  repository: https://github.com/Paul-Jeo/Image2PPT
+  repository: https://github.com/Altria600/image2ppt
+  base_commit: 41c869a61535081a3df8862f587e363c1c96c0a1
+  upstream_repository: https://github.com/Paul-Jeo/Image2PPT
   license: MIT
 
-sync:
-  authoritative_repository: https://github.com/Yuan1z0825/nature-skills
-  authoritative_path: skills/nature-image2ppt
-  authoritative_commit: 3817cd194c31010febb1312ab786e53cd8154333
+upstream_snapshot:
+  repository: https://github.com/Yuan1z0825/nature-skills
+  path: skills/nature-image2ppt
+  commit: 3817cd194c31010febb1312ab786e53cd8154333
 
 runtime:
   python: ">=3.10"

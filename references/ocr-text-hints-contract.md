@@ -1,68 +1,43 @@
 # OCR and Text Hints Contract
 
-## Credential and configuration
+文本提示用于测量和定位，不替代 agent 对源图字符的核对。默认走本地 `builtin-ink`：不读取 Paddle token、不上传页面、不因 token 存在而联网。
 
-The cloud backend requires one Baidu AI Studio Access Token named
-`PADDLE_OCR_TOKEN`. It is not the traditional Baidu `API Key + Secret Key` pair.
-Apply at <https://aistudio.baidu.com/account/accessToken> and configure it with:
+## 显式远程 OCR
+
+只有用户明确允许远程 OCR 时，才在命令中传 `--allow-remote-ocr`：
 
 ```bash
-python <image2ppt-root>/cli/image2ppt/cli.py config \
-  --paddle-ocr-token "<BAIDU_AI_STUDIO_ACCESS_TOKEN>"
+python <image2ppt-root>/cli/image2ppt/cli.py prepare input.pdf \
+  --allow-remote-ocr
+python <image2ppt-root>/cli/image2ppt/cli.py run hints <run-dir> \
+  --allow-remote-ocr
 ```
 
-The process environment has priority over the active `config.yaml`, resolved as
-override directory, project-level Skill root, then legacy user-level location.
-Never print, commit, or copy the token into a run.
+远程路径读取本地 `PADDLE_OCR_TOKEN`，只发送当前任务必须的页面数据。配置 token 不等于授权上传；不传开关时必须保持本地路径。网络失败不触发其他远程服务，也不覆盖已存在的本地 hints。
 
-## Fixed network client behavior
+当前远程实现若使用 PaddleOCR，应在运行输出中记录 endpoint/model 的实际值；不要把 token、响应中的私密内容或机器路径写入日志。Windows/macOS、服务配额和网络可用性没有在本项目中宣称已验证。
 
-- Endpoint: `https://paddleocr.aistudio-app.com/api/v2/ocr/jobs`
-- Default model: `PaddleOCR-VL-1.6`
-- Authorization: `Authorization: bearer <token>`
-- Submit: multipart file plus `model` and the existing `optionalPayload` flags.
-- Poll: `GET <endpoint>/<jobId>` until `done`; fail on `failed` or timeout.
-- Result: download the service JSONL URL and collect every page's
-  `prunedResult` from `layoutParsingResults`.
+## 本地测量与使用
 
-Do not change response interpretation or add another OCR normalizer. Missing pages,
-non-200 submission, failed jobs, timeout, malformed/empty results, download errors,
-and network exceptions are OCR failures.
+`prepare` 为每页生成 `text_hints.json` 和可选的 `text_hints.png`。每条提示包含源像素 `box_px`、字高、行数、CJK/Latin 字号候选、`size_group` 和生成 backend。提示可能漏字、合并行或误把图形当文字；最终文字以源图为准。
 
-Use the original PDF as one multi-page job when it is available. For a single image,
-multiple images, PPT/PPTX pages, or a PDF run whose original file is unavailable,
-submit each normalized `source.png` directly as its own job, in page order. Never
-convert normalized images into a temporary PDF for OCR. Rescale service coordinates
-to each actual source image before local measurement.
+重生成单页提示：
 
-## Text filtering and local measurement
+```bash
+python <image2ppt-root>/cli/image2ppt/cli.py page hints <page-dir>
+```
 
-Keep only `text`, `paragraph_title`, and `vision_footnote` layout blocks. Preserve
-recognized text as advisory content, then remeasure every block against the local
-source ink. Produce source-pixel `box_px`, glyph height, line count, CJK/Latin font
-size candidates, and a stable size group. Trust direct source reading for final
-characters because recognition may be imperfect.
-
-## Backend priority and fallback
-
-1. If a token is available, attempt the network job first.
-2. On any cloud failure, generate each page with local `builtin-ink`.
-3. Even after successful cloud OCR, if a page has at most 2 OCR lines while the
-   local detector finds at least 6, use the local result for that page.
-4. Local fallback measures geometry and font scale but cannot recognize characters.
-5. A page-level hint failure is reported and skipped; reconstruction may regenerate
-   it with `page hints` or proceed by reading the source.
-
-Do not change these thresholds or priorities during reconstruction.
-
-## Artifacts and regeneration
-
-`prepare` writes `text_hints.json` and `text_hints.png` beside every normalized page.
-Regenerate without creating a second run:
+重生成整次运行提示：
 
 ```bash
 python <image2ppt-root>/cli/image2ppt/cli.py run hints <run-dir>
 ```
 
-Use `page hints <page-dir>` only for one-page local ink regeneration. Hints are
-advisory page inputs, not lifecycle state and not a substitute for manifest text.
+只有显式的 `--allow-remote-ocr` 才允许以上 run-level 命令调用云端；没有该开关即使配置了 token 也使用本地测量。
+
+## 文字所有权
+
+- 主要标题、正文、数字、标签、表格文字和图表标签通常是原生文本框。
+- Logo 字标、地图底图、截图内不要求编辑的小字、照片中的招牌等例外，要在 `visual_inventory` 或 `asset_provenance` 说明。
+- 文字不能用生成图片、隐藏文本、透明文本、1 pt 文本或画外文本伪装成可编辑。
+- 新页使用 `typography_policy: governed`，将提示中的测量框和字号与共享 `text_style_id`、`alignment_group`/`role` 对齐；溢出先修换行、框或整体同级样式。

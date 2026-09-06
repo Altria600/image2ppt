@@ -18,8 +18,33 @@ from pathlib import Path
 DEFAULT_CONFIG_HOME = "~/.image2ppt"
 DEFAULT_CODEX_AUTH_FILE = "~/.codex/auth.json"
 DEFAULT_IMAGE_MODEL = "gpt-image-2"
-DEFAULT_IMAGE_BACKEND = "auto"
-ALLOWED_IMAGE_BACKENDS = {"auto", "codex-oauth", "openai-compatible-api"}
+DEFAULT_IMAGE_BACKEND = "local-only"
+
+# Backends describe a run/manifest contract.  ``local-only`` is deliberately
+# the default: it covers native/SVG/source-extracted reconstruction and never
+# needs an image provider.  The two legacy names remain accepted so existing
+# manifests can be inspected or migrated without silently acquiring a remote
+# fallback.
+BACKEND_AUTO = "auto"
+BACKEND_LOCAL_ONLY = "local-only"
+BACKEND_HOST_IMAGE_TOOL = "host-image-tool"
+BACKEND_EXTERNAL_IMPORT = "external-import"
+BACKEND_BUILTIN_IMAGEGEN = "builtin-imagegen"
+BACKEND_IMAGE_CLI_LEGACY = "image2ppt-image-cli"
+BACKEND_OPENAI_COMPATIBLE = "openai-compatible-api"
+BACKEND_CODEX_OAUTH = "codex-oauth"
+
+ALLOWED_IMAGE_BACKENDS = {
+    BACKEND_AUTO,
+    BACKEND_LOCAL_ONLY,
+    BACKEND_HOST_IMAGE_TOOL,
+    BACKEND_EXTERNAL_IMPORT,
+    BACKEND_BUILTIN_IMAGEGEN,
+    BACKEND_IMAGE_CLI_LEGACY,
+    BACKEND_OPENAI_COMPATIBLE,
+    BACKEND_CODEX_OAUTH,
+}
+REMOTE_IMAGE_BACKENDS = {BACKEND_OPENAI_COMPATIBLE, BACKEND_CODEX_OAUTH}
 ENV_FIELDS = (
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
@@ -132,18 +157,59 @@ def codex_model_compatible(model: str) -> bool:
     return "gpt-image-" in str(model).lower()
 
 
-def select_image_backend(values: dict, codex_ready: bool, api_ready: bool) -> tuple[str, bool]:
+def configured_image_backend(values: dict) -> str:
+    """Return the configured backend without probing any provider.
+
+    In particular, ``auto`` is a local-only policy.  It is retained as a
+    configuration value for compatibility, but must never inspect another
+    host's OAuth file or switch to a remote provider based on credentials.
+    """
+
     preference = str(values.get("IMAGE2PPT_IMAGE_BACKEND") or DEFAULT_IMAGE_BACKEND).strip().lower()
+    return preference or DEFAULT_IMAGE_BACKEND
+
+
+def is_remote_backend(backend: str) -> bool:
+    return str(backend).strip().lower() in REMOTE_IMAGE_BACKENDS
+
+
+def select_image_backend(
+    values: dict,
+    codex_ready: bool = False,
+    api_ready: bool = False,
+    *,
+    host_tool_declared: bool = False,
+) -> tuple[str, bool]:
+    """Resolve a manifest backend without implicit provider switching.
+
+    ``codex_ready`` and ``api_ready`` are supplied by an explicitly selected
+    backend/doctor check.  They are not used to make ``auto`` remote.  The
+    second tuple value is a readiness indication for the selected contract;
+    it is not user authorization to perform a remote call.
+    """
+
+    preference = configured_image_backend(values)
     if preference not in ALLOWED_IMAGE_BACKENDS:
         return "invalid", False
-    model = str(values.get("IMAGE2PPT_IMAGE_MODEL") or DEFAULT_IMAGE_MODEL)
-    if preference == "codex-oauth":
-        return "codex-oauth", bool(codex_ready and codex_model_compatible(model))
-    if preference == "openai-compatible-api":
-        return "openai-compatible-api", api_ready
-    if codex_ready and codex_model_compatible(model):
-        return "codex-oauth", True
-    return "openai-compatible-api", api_ready
+    if preference == BACKEND_AUTO:
+        return BACKEND_LOCAL_ONLY, True
+    if preference in {BACKEND_LOCAL_ONLY, BACKEND_EXTERNAL_IMPORT}:
+        return preference, True
+    if preference == BACKEND_HOST_IMAGE_TOOL:
+        # Host capability is a declaration in a manifest, never inferred from
+        # a subprocess environment.  ``None`` is represented as not-ready here
+        # while the contract itself remains valid for the agent to fulfill.
+        return preference, bool(host_tool_declared)
+    if preference == BACKEND_BUILTIN_IMAGEGEN:
+        return preference, bool(host_tool_declared)
+    if preference == BACKEND_IMAGE_CLI_LEGACY:
+        return preference, True
+    if preference == BACKEND_CODEX_OAUTH:
+        model = str(values.get("IMAGE2PPT_IMAGE_MODEL") or DEFAULT_IMAGE_MODEL)
+        return preference, bool(codex_ready and codex_model_compatible(model))
+    if preference == BACKEND_OPENAI_COMPATIBLE:
+        return preference, bool(api_ready)
+    return "invalid", False
 
 
 def config(args: argparse.Namespace) -> int:
@@ -162,7 +228,8 @@ def config(args: argparse.Namespace) -> int:
         backend = args.image_backend.strip().lower()
         if backend not in ALLOWED_IMAGE_BACKENDS:
             raise SystemExit(
-                "--image-backend must be auto, codex-oauth, or openai-compatible-api"
+                "--image-backend must be local-only, host-image-tool, external-import, "
+                "openai-compatible-api, or explicitly selected codex-oauth"
             )
         values["IMAGE2PPT_IMAGE_BACKEND"] = backend
     if args.image_user_agent is not None:
@@ -195,6 +262,7 @@ def module_status() -> dict[str, dict]:
         "yaml": "local configuration",
         "numpy": "offline ink metrics",
         "requests": "PaddleOCR HTTP client",
+        "resvg_py": "portable SVG preview and PowerPoint PNG compatibility image",
     }
     return {
         name: {"available": importlib.util.find_spec(name) is not None, "purpose": purpose}
@@ -203,10 +271,22 @@ def module_status() -> dict[str, dict]:
 
 
 def renderer_status() -> dict:
+    try:
+        from .platform_tools import discover_libreoffice
+    except ImportError:
+        from platform_tools import discover_libreoffice
+
     system = platform.system().lower()
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")
-    libreoffice = shutil.which("libreoffice") or shutil.which("soffice")
-    powerpoint_candidate = bool(system == "windows" and powershell)
+    libreoffice = discover_libreoffice()
+    powerpoint_candidate = False
+    if system == "windows" and powershell:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"PowerPoint.Application\CLSID"):
+                powerpoint_candidate = True
+        except (ImportError, OSError):
+            pass
     selection = "powerpoint-com" if powerpoint_candidate else ("libreoffice" if libreoffice else "missing")
     return {
         "platform": system,
@@ -251,8 +331,10 @@ def image_processing_status(modules: dict[str, dict]) -> dict:
     return {
         "pillow": modules["PIL"]["available"],
         "imagemagick": imagemagick,
+        "svg_renderer": "resvg_py" if modules.get("resvg_py", {}).get("available") else None,
+        "local_vector_tracing": importlib.util.find_spec("vtracer") is not None,
         "ready": modules["PIL"]["available"],
-        "note": "Pillow is the primary processor; ImageMagick is used for optional formula/image conversion paths.",
+        "note": "Pillow processes raster assets; resvg_py renders SVG; VTracer is optional for local tracing.",
     }
 
 
@@ -291,7 +373,14 @@ def internal_resource_status() -> dict:
     return {"ready": all(item["exists"] for item in files.values()), "files": files}
 
 
-def collect_status(check_api: bool = False, check_ocr: bool = False) -> dict:
+def collect_status(
+    check_api: bool = False,
+    check_ocr: bool = False,
+    *,
+    image_backend: str | None = None,
+    check_codex: bool = False,
+    allow_remote_ocr: bool = False,
+) -> dict:
     home = runtime_home()
     active_config = config_path(home)
     config_values = read_config_file(active_config)
@@ -306,12 +395,25 @@ def collect_status(check_api: bool = False, check_ocr: bool = False) -> dict:
     processing = image_processing_status(modules)
     resources = internal_resource_status()
     api_ready = bool(values.get("OPENAI_API_KEY"))
-    codex_ready = codex_oauth_ready()
+    if image_backend:
+        values["IMAGE2PPT_IMAGE_BACKEND"] = image_backend
+    configured_backend = configured_image_backend(values)
+    # OAuth is deliberately opt-in.  The default/auto path must not even read
+    # another host's ~/.codex/auth.json.
+    codex_checked = configured_backend == BACKEND_CODEX_OAUTH or check_codex
+    codex_ready = codex_oauth_ready() if codex_checked else False
     selected_backend, cli_fallback_ready = select_image_backend(values, codex_ready, api_ready)
     token = str(values.get("PADDLE_OCR_TOKEN") or "").strip()
     token_source = "environment" if os.getenv("PADDLE_OCR_TOKEN") else ("config" if token else "unset")
     offline_ready = modules["PIL"]["available"] and modules["numpy"]["available"]
     dependency_ready = all(item["available"] for item in modules.values())
+    if check_api:
+        if configured_backend == BACKEND_CODEX_OAUTH:
+            remote_check_ready = codex_ready
+        else:
+            remote_check_ready = api_ready
+    else:
+        remote_check_ready = True
     ok = (
         dependency_ready
         and renderer["ready"]
@@ -319,9 +421,38 @@ def collect_status(check_api: bool = False, check_ocr: bool = False) -> dict:
         and processing["ready"]
         and resources["ready"]
         and offline_ready
-        and (cli_fallback_ready if check_api else True)
+        and (remote_check_ready if check_api else True)
         and (bool(token) if check_ocr else True)
     )
+    api_status = {
+        "ready": api_ready,
+        "configured": api_ready,
+        "authorized": False,
+        "OPENAI_API_KEY": "set" if api_ready else "unset",
+        "OPENAI_BASE_URL": values.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        "IMAGE2PPT_IMAGE_MODEL": values.get("IMAGE2PPT_IMAGE_MODEL", "<configured-by-user>"),
+        "IMAGE2PPT_IMAGE_USER_AGENT": values.get("IMAGE2PPT_IMAGE_USER_AGENT", "<default>"),
+        "requires_allow_remote": True,
+    }
+    host_status = {
+        "checked": False,
+        "ready": None,
+        "tool_name": None,
+        "tool_call": None,
+        "declaration_required": True,
+        "agent_only": True,
+        "subprocess_invocation": False,
+    }
+    codex_status = {
+        "checked": codex_checked,
+        "ready": codex_ready if codex_checked else None,
+        "auth_file": str(codex_auth_file()) if codex_checked else None,
+        "authorized": False,
+        "requires_allow_remote": True,
+        "legacy": True,
+    }
+    legacy_agent_status = dict(host_status)
+    legacy_agent_status["tool_name"] = "image_gen.imagegen"
     return {
         "schema_version": "image2ppt-doctor-v1",
         "ok": ok,
@@ -337,38 +468,57 @@ def collect_status(check_api: bool = False, check_ocr: bool = False) -> dict:
         "fonts": fonts,
         "image_processing": processing,
         "ocr": {
-            "selection": "paddleocr-vl" if token else "builtin-ink",
+            # A configured token is an optional capability, not permission to
+            # upload.  Remote OCR only becomes selected after the explicit
+            # allow flag is carried through the caller.
+            "selection": "paddleocr-vl" if token and allow_remote_ocr else "builtin-ink",
+            "configured": bool(token),
+            "remote_authorized": bool(token and allow_remote_ocr),
             "token": "set" if token else "unset",
             "token_source": token_source,
             "endpoint": PADDLE_ENDPOINT,
             "model": PADDLE_MODEL,
             "network_client_ready": modules["requests"]["available"],
             "network_probe_performed": False,
-            "fallback": {"backend": "builtin-ink", "ready": offline_ready, "priority": "network-first-then-local"},
+            "fallback": {"backend": "builtin-ink", "ready": offline_ready, "priority": "local-first"},
             "apply_url": PADDLE_TOKEN_APPLY_URL,
             "configure_command": "image2ppt config --paddle-ocr-token <token>",
         },
         "image_backend": {
-            "agent_builtin": {"checked": False, "ready": None, "tool_name": "image_gen.imagegen"},
-            "codex_oauth": {"ready": codex_ready, "auth_file": str(codex_auth_file())},
-            "api_fallback": {
-                "ready": api_ready,
-                "OPENAI_API_KEY": "set" if api_ready else "unset",
-                "OPENAI_BASE_URL": values.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-                "IMAGE2PPT_IMAGE_MODEL": values.get("IMAGE2PPT_IMAGE_MODEL", DEFAULT_IMAGE_MODEL),
-                "IMAGE2PPT_IMAGE_USER_AGENT": values.get("IMAGE2PPT_IMAGE_USER_AGENT", "<default>"),
-            },
-            "preference": values.get("IMAGE2PPT_IMAGE_BACKEND", DEFAULT_IMAGE_BACKEND),
+            "default": DEFAULT_IMAGE_BACKEND,
+            "preference": configured_backend,
             "cli_fallback_ready": cli_fallback_ready,
             "selection": selected_backend,
+            "local_only": {"ready": offline_ready, "remote_credentials_required": False},
+            "host_image_tool": host_status,
+            # Legacy doctor consumers can still inspect this key; it is an
+            # unprobed capability, never an inferred host-tool availability.
+            "agent_builtin": legacy_agent_status,
+            "external_import": {"ready": True, "remote_credentials_required": False},
+            "codex_oauth": codex_status,
+            "api": api_status,
+            # Compatibility key for consumers that still call this a fallback.
+            "api_fallback": api_status,
+            "remote_authorization": {"provided": False, "control": "--allow-remote"},
         },
-        "checks_requested": {"require_image_api": check_api, "require_network_ocr_token": check_ocr},
+        "checks_requested": {
+            "require_image_api": check_api,
+            "require_network_ocr_token": check_ocr,
+            "check_codex_oauth": codex_checked,
+            "allow_remote_ocr": allow_remote_ocr,
+        },
         "next": "no action needed" if ok else "inspect failed doctor sections and install/configure only the missing local or system dependency",
     }
 
 
 def doctor(args: argparse.Namespace) -> int:
-    status = collect_status(check_api=args.check_api, check_ocr=args.check_ocr)
+    status = collect_status(
+        check_api=args.check_api,
+        check_ocr=args.check_ocr,
+        image_backend=getattr(args, "image_backend", None),
+        check_codex=getattr(args, "check_codex", False),
+        allow_remote_ocr=getattr(args, "allow_remote_ocr", False),
+    )
     if args.json:
         print(json.dumps(status, ensure_ascii=False, indent=2))
         return 0 if status["ok"] else 1
@@ -384,15 +534,26 @@ def doctor(args: argparse.Namespace) -> int:
     processing = status["image_processing"]
     print(f"image processing: Pillow={'ready' if processing['pillow'] else 'missing'} ImageMagick={processing['imagemagick'] or 'optional/missing'}")
     ocr = status["ocr"]
-    print(f"OCR: {ocr['selection']} token={ocr['token']} source={ocr['token_source']}")
+    print(
+        f"OCR: {ocr['selection']} token={ocr['token']} source={ocr['token_source']} "
+        f"remote_authorized={'yes' if ocr['remote_authorized'] else 'no'}"
+    )
     print(f"OCR endpoint: {ocr['endpoint']}")
     print(f"OCR model: {ocr['model']}")
     print(f"OCR fallback: {ocr['fallback']['backend']} ({'ready' if ocr['fallback']['ready'] else 'missing'})")
     backend = status["image_backend"]
-    print(f"image CLI fallback: {backend['selection']} ({'ready' if backend['cli_fallback_ready'] else 'not configured'})")
+    print(f"image backend: {backend['selection']} ({'ready' if backend['cli_fallback_ready'] else 'optional/not configured'})")
+    print(f"remote authorization: {backend['remote_authorization']['control']} (not granted by environment keys)")
+    if backend["codex_oauth"]["checked"]:
+        print(f"Codex OAuth: {'ready' if backend['codex_oauth']['ready'] else 'missing'} (explicitly selected)")
+    else:
+        print("Codex OAuth: not checked (select codex-oauth explicitly to inspect it)")
     print(f"internal resources: {'ready' if status['internal_resources']['ready'] else 'missing'}")
     if ocr["token"] == "unset":
-        print(f"PaddleOCR token is optional but recommended: apply at {ocr['apply_url']}, then run `{ocr['configure_command']}`.")
+        print(
+            "PaddleOCR token is optional and does not authorize uploads; configure it only when needed, "
+            f"then pass --allow-remote-ocr (apply at {ocr['apply_url']}; run `{ocr['configure_command']}`)."
+        )
     print(f"next: {status['next']}")
     return 0 if status["ok"] else 1
 
@@ -401,7 +562,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="image2ppt", description="Manage Image2PPT configuration and runtime diagnostics")
     sub = parser.add_subparsers(required=True)
     doc = sub.add_parser("doctor", help="Check local runtime, rendering, OCR, image, font, and resource readiness")
-    doc.add_argument("--check-api", action="store_true", help="Require Codex OAuth or image API credentials.")
+    doc.add_argument("--check-api", action="store_true", help="Require credentials for the explicitly selected remote backend.")
+    doc.add_argument(
+        "--image-backend",
+        choices=sorted(ALLOWED_IMAGE_BACKENDS),
+        help="Inspect this backend; auto resolves to local-only and never checks OAuth.",
+    )
+    doc.add_argument(
+        "--check-codex",
+        action="store_true",
+        help="Explicitly inspect CODEX_AUTH_FILE; never implied by auto/local-only.",
+    )
+    doc.add_argument(
+        "--allow-remote-ocr",
+        action="store_true",
+        help="Explicitly select PaddleOCR-VL when a configured token exists; no network probe is performed by doctor.",
+    )
     doc.add_argument("--check-ocr", action="store_true", help="Require a configured PaddleOCR token; no network request is made.")
     doc.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     doc.add_argument("--timeout", type=int, default=30, help="Reserved for opt-in network probes.")

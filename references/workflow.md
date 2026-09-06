@@ -1,142 +1,65 @@
 # Workflow and Run Contract
 
-## Contents
+工作流只有一套运行状态和一套构建源。并发 worker 是可选优化；没有 delegation 时，main agent 通过相同的 CLI 逐页串行完成。
 
-- [Ownership map](#ownership-map)
-- [Authoritative files](#authoritative-files)
-- [Local entrypoint](#local-entrypoint)
-- [Sequence](#sequence)
-- [Lifecycle invariants](#lifecycle-invariants)
-- [Speaker notes and final assembly](#speaker-notes-and-final-assembly)
-- [Retry behavior](#retry-behavior)
+## 权威文件
 
-## Ownership map
-
-| Phase | Authoritative local implementation |
+| 阶段 | 权威文件/实现 |
 | --- | --- |
-| Input normalization | `cli/image2ppt/runtime/_input_normalization.py` and `prepare_deck_run.py` |
-| OCR and text hints | `paddle_text_hints.py`, `deck_text_hints.py`, `text_hints.py` |
-| Run/page state | `page_jobs.json` through the local CLI `run` commands |
-| Page worker Prompt | local base `prompts/page-worker-base.md` plus preserved profile `prompts/page-worker.md`, composed by `scripts/build_page_worker_prompt.py` |
-| Page content and build | page `manifest.json` and local `page build` |
-| Record/reset/finalize | local `run record/reset/finalize` |
-| Semantic regions and compound measurements | in-manifest evidence plus `inspect_region_decomposition.py` |
-| Arrow reconstruction | manifest arrow extension plus local postprocessor/inspector |
-| Rendering and delivery QA | local page/final QA scripts |
+| 输入归一化 | `prepare` 与 `cli/image2ppt/runtime/` |
+| 文本提示 | `text_hints.json`/`text_hints.png`，仅作测量提示 |
+| 页面状态 | `page_jobs.json` 与 `run` 子命令 |
+| 页面 Prompt | `prompts/page-worker-base.md` + `prompts/page-worker.md` |
+| 页面内容 | `pages/page_NNN/manifest.json` |
+| 页面构建 | `page build` |
+| 页面/最终 QA | `run_image2ppt_qa.py`、`run_final_image2ppt_qa.py` |
+| 最终装配 | `run finalize` |
 
-No phase reads another Skill. There is no alternate OCR output, page controller,
-reconstruction-plan packager, or deck assembler.
+禁止另建 page plan、OCR 副本、controller、第二 manifest、第二装配器或替代 lifecycle。区域、来源和 QA 都写回标准 manifest 或 supplemental report。
 
-## Authoritative files
-
-- `deck_manifest.json`: prepared input, page order, canvas, image backend, notes,
-  and final output contract.
-- `page_jobs.json`: only authoritative page status, dispatch lease, and result
-  record.
-- `run_state.json`: run history written by local lifecycle commands.
-- `pages/page_NNN/manifest.json`: only authoritative page build input.
-- `pages/page_NNN/validation.json`: page record gate; supplemental QA extends it
-  in place under `image2ppt_profile`.
-- `pages/page_NNN/page_result.json`: worker return contract.
-
-Every page-owned path resolves inside its page directory; every run/final path
-resolves inside the prepared run. Traversal, absolute escapes, and symlink escapes
-are invalid state, not alternate output locations.
-
-Forbidden parallel state includes `image2ppt_jobs.json`, a second page plan,
-another OCR result schema, an alternate page result, and any second
-accepted/recorded/finalized state. Region evidence inside `manifest.json` is build
-evidence, not controller state.
-
-## Local entrypoint
-
-Use the source-tree CLI for reproducible execution:
-
-```bash
-python <image2ppt-root>/cli/image2ppt/cli.py prepare ...
-python <image2ppt-root>/cli/image2ppt/cli.py run next <run> --json
-python <image2ppt-root>/cli/image2ppt/cli.py run dispatch <run> ...
-python <image2ppt-root>/cli/image2ppt/cli.py run record <run> ...
-python <image2ppt-root>/cli/image2ppt/cli.py run reset <run> ...
-python <image2ppt-root>/cli/image2ppt/cli.py run hints <run>
-python <image2ppt-root>/cli/image2ppt/cli.py run finalize <run>
-```
-
-The optional installed `image2ppt` wrapper resolves to the same bundled package.
-
-## Sequence
+## 生命周期
 
 ```text
-local prepare
-  -> local run next
-  -> local worker Prompt builder
-  -> local run dispatch
-  -> worker writes regions and all objects to manifest.json
-  -> local page build
-  -> local region inspection + arrow postprocess + page render QA template
-  -> source/render inspection + hash-bound structured visual evidence
-  -> worker writes page_result.json
-  -> local run record
-  -> local run finalize
-  -> local final arrow postprocess + structure/render QA
+prepare
+  -> run next
+  -> build_page_worker_prompt
+  -> run dispatch (worker 或 --local)
+  -> 页面 inventory/route/manifest
+  -> page build + page validate + render QA
+  -> run record
+  -> run finalize
+  -> final render/structure QA
 ```
 
-The Prompt builder preserves the original two-layer order: it renders the complete
-local base Prompt, appends the local Image2PPT profile, and substitutes only local
-paths and the absolute source-tree CLI invocation. The arrow postprocessor derives target objects from the
-same stable `(z_index, manifest order)` mapping used by the local builder and
-preserves non-slide package parts.
+### 多页与单 Agent
 
-## Lifecycle invariants
+有并发能力时，只并行独立页面，按 `max_concurrent_pages` 和页面目录 ownership 分配。没有并发能力时同样支持多页：
 
-1. `prepare` normalizes inputs, extracts note metadata, creates page requests and
-   text hints, initializes `page_jobs.json`, and records the image backend.
-2. `run next` reads state only and recommends configuration, dispatch, wait, or
-   finalize.
-3. `run dispatch` records one active execution lease. Single-page local work uses
-   `--local`; multi-page work records the worker id and absolute Prompt path.
-4. A dispatched page remains active until explicit completion, failure,
-   cancellation, or verified loss. Time elapsed alone is not loss.
-5. `run record` validates artifacts, manifest structure, hashes, and top-level
-   `validation.json.passed=true` before recording the page.
-6. `run reset` is the only supported transition back to pending after a rejected,
-   failed, cancelled, or verified-lost execution.
-7. `run finalize` accepts only fully recorded pages, rebuilds the deck from page
-   manifests in order, validates it, atomically publishes the final PPTX inside
-   the run, and updates the existing run/deck state.
+1. `run next --json --local` 领取一个 pending page；JSON 中使用返回的 `next_argv` 数组，不要自行拼接含中文或空格路径的 `next_command`；
+2. 生成该页 Prompt，并用 `run dispatch --local --agent-id main` 建立 lease；
+3. 完成构建和 QA，再 `run record --agent-id main`；
+4. 重复下一页，最后 `run finalize`。
 
-Supplemental page/final QA may write report files and extend `validation.json`, but
-must never update `page_jobs.json`, `deck_manifest.json`, or `run_state.json`.
-Free-text review notes do not close visual review. The required evidence is bound
-to the current source/render hashes and covers every page and conditional check.
+一个 main agent 同时不能持有多个 local lease。页面完成后才领取下一页；不要手工改 `page_jobs.json`。
 
-## Speaker notes and final assembly
+## 运行级不变量
 
-`prepare` is the only note-extraction stage. For PPT/PPTX input it reads note-slide
-parts, records page mapping, text, hashes, and preserved note XML under
-`notes_manifest.json`, and keeps note resources inside the run input area.
+1. `prepare` 复制输入、生成源页、`page_request.json`、`page_jobs.json`、文本提示和 speaker-note 清单。
+2. `run next` 只读状态，给出 configure/dispatch/wait/finalize 建议；`--local` 让多页任务也逐页生成 local dispatch 建议。
+3. `run dispatch` 记录 worker 或 local lease、Prompt hash、page request hash 和写入范围。
+4. 已 dispatch 页面保持 active，除非 worker 明确完成、失败、取消或经确认已丢失；时间经过不自动 reset。
+5. `run record` 校验页面产物、manifest 路径、结构、hash 和顶层 `validation.json.passed: true`。
+6. `run reset` 是回到 pending 的唯一支持路径。修复页重新 dispatch；已记录页不能直接改 final PPTX。
+7. `run finalize` 只读取已记录 manifest，按页序重建最终 deck，恢复 speaker notes，并在同一 run 内原子发布。
 
-Page workers must not receive, translate, summarize, rewrite, or delete speaker
-notes. Page manifests describe slide content only.
+## Backend 与网络
 
-`run finalize` is the only assembly stage. It reads recorded page manifests in
-page order, rebuilds every slide, and restores the corresponding note slide from
-the preserved XML when available; otherwise it writes the preserved note text.
-It writes the output path and completion metadata to the existing
-`deck_manifest.json`/run state.
+每个 run 的 `image_backend` 原样复制到 `page_request.json`。默认 `local-only`；`host-image-tool` 必须有显式工具名/调用名；`builtin-imagegen`、`external-import`、`openai-compatible-api`、`codex-oauth` 都是显式选择。工具失败不静默 fallback；记录 blocked 原因，并保留已经完成的其他页面。
 
-Final validation compares expected and produced page counts, required text,
-asset provenance, and note text hashes. A missing note slide or hash mismatch is a
-hard final validation failure. Final Image2PPT QA runs after assembly and must not
-alter lifecycle state or note content.
+远程 OCR 只有用户在当前 `prepare` 或 `run hints` 命令中明确传 `--allow-remote-ocr` 才能执行；授权不写入 `page_request.json` 或其他持久状态。普通 prepare/run hints 不读取 token、不上传页面。
 
-## Retry behavior
+## 备注、失败与验收
 
-Do not hand-edit `page_jobs.json`. Repair a page's authoritative manifest/assets
-inside a valid execution lease and rerun the same page gates. If execution failed,
-was cancelled, or is verified lost, use local `run reset`, dispatch again, and
-record again. Finalization always rebuilds from recorded manifests, so rerun final
-QA after every finalize.
+`prepare` 是唯一 speaker-note 提取阶段；页面 worker 不读取、改写或删除 notes。`run finalize` 是唯一装配阶段。
 
-If final QA fails, repair the authoritative page manifest through that lifecycle
-and finalize again. Do not patch only the final deck or create another assembler.
+如果某页缺少 renderer，允许先构建和做结构校验，但该页的视觉 review 必须保持 pending/unsupported；不能通过复制旧 evidence 或 free-text 关闭门禁。若 QA 失败，修复页面 manifest/assets，按 `run reset` → dispatch → record → finalize 重做。不要只改最终 PPTX。

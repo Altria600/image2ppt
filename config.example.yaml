@@ -1,19 +1,19 @@
-# Project-level Skill: copy this file to ./config.yaml and fill secrets locally.
-# config.yaml is ignored by Git and must never be committed.
-# Global/legacy installation: ~/.image2ppt/config.yaml remains supported.
-# On Linux/macOS: chmod 600 ./config.yaml
+# Copy to config.yaml for local use. Never commit config.yaml or real secrets.
+# The default image route is local-only; these fields are read only after the
+# corresponding backend or --allow-remote-ocr option is selected explicitly.
 
-# One Baidu AI Studio Access Token, not an API Key/Secret Key pair.
-# Apply at https://aistudio.baidu.com/account/accessToken
+# Remote OCR is opt-in. A token alone never authorizes an OCR upload.
 PADDLE_OCR_TOKEN: ""
 
-# Optional image-generation transport. The API path is protocol-based rather than
-# provider-name based: any model is accepted when the endpoint implements the
-# OpenAI Images-compatible /images/generations and/or /images/edits contract.
-# auto uses Codex OAuth only for GPT Image model ids; other model ids use the API.
+# Explicit OpenAI Images-compatible API route. The endpoint must implement the
+# protocol, regardless of provider or model naming. Keep credentials local.
 # OPENAI_API_KEY: ""
-# OPENAI_BASE_URL: "https://api.openai.com/v1"
-# IMAGE2PPT_IMAGE_BACKEND: "auto"  # auto | codex-oauth | openai-compatible-api
-# IMAGE2PPT_IMAGE_MODEL: "gpt-image-2"
-# Optional compatibility override for relays that filter the default SDK client.
+# OPENAI_BASE_URL: "https://api.example/v1"
+# IMAGE2PPT_IMAGE_BACKEND: "openai-compatible-api"
+# IMAGE2PPT_IMAGE_MODEL: "provider-model-id"
 # IMAGE2PPT_IMAGE_USER_AGENT: ""
+
+# Optional defaults for a host-provided image tool. The host must expose these
+# exact names; Image2PPT never infers them from another application's config.
+# IMAGE2PPT_HOST_TOOL_NAME: ""
+# IMAGE2PPT_HOST_TOOL_CALL: ""

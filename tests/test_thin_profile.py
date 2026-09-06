@@ -51,33 +51,41 @@ class SingleRuntimeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["state_owner"], "page_jobs.json")
-            self.assertEqual(Path(payload["prompt_template"]), SKILL_ROOT / "prompts" / "page-worker-base.md")
-            self.assertEqual(Path(payload["prompt_addendum"]), SKILL_ROOT / "prompts" / "page-worker.md")
+            prompt_template = Path(payload["prompt_template"])
+            prompt_addendum = Path(payload["prompt_addendum"])
+            self.assertEqual(prompt_template, SKILL_ROOT / "prompts" / "page-worker-base.md")
+            self.assertEqual(prompt_addendum, SKILL_ROOT / "prompts" / "page-worker.md")
+            self.assertTrue(prompt_template.is_file())
+            self.assertTrue(prompt_addendum.is_file())
             prompt = out.read_text(encoding="utf-8")
-            self.assertIn("Rebuild one page for Image2PPT", prompt)
             self.assertIn(str(SKILL_ROOT / "cli/image2ppt/cli.py"), prompt)
-            self.assertIn("Every non-text foreground visual object must be separated", prompt)
-            self.assertIn("Execute the three steps in order", prompt)
-            self.assertIn("Do not invent an object-source strategy", prompt)
-            self.assertIn("Put icons/foreground objects onto one sparse asset sheet", prompt)
-            self.assertIn("Replace only the base prompt's final page build/validate sequence", prompt)
-            self.assertIn("3-8 semantic regions", prompt)
-            self.assertIn("text_style_id", prompt)
-            self.assertIn("visual style anchor", prompt)
-            self.assertIn("image2ppt_region_decomposition", prompt)
-            self.assertIn("every node center/size and every edge endpoint/direction", prompt)
-            self.assertIn("complex local subparts that would visibly drift", prompt)
+            self.assertIn("Image2PPT", prompt)
+            for contract in (
+                "page_jobs.json",
+                "manifest.json",
+                "asset_provenance",
+                "image2ppt_region_decomposition",
+                "text_style_id",
+                "validation.json",
+                "run_image2ppt_qa.py",
+            ):
+                self.assertIn(contract, prompt)
             self.assertNotIn("{{RUN_DIR}}", prompt)
+            self.assertNotIn("{{PAGE_DIR}}", prompt)
             self.assertNotIn("{{CLI}}", prompt)
 
     def test_skill_declares_local_owners_and_final_gate(self) -> None:
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("`page_jobs.json` as the only page-state source", skill)
-        self.assertIn("`pages/page_NNN/manifest.json` as the only page-content source", skill)
-        self.assertIn("PADDLE_OCR_TOKEN", skill)
-        self.assertIn("builtin-ink", skill)
-        self.assertIn("run_final_image2ppt_qa.py", skill)
-        self.assertIn("measured compound diagrams", skill.lower())
+        for contract in (
+            "page_jobs.json",
+            "manifest.json",
+            "Paddle token",
+            "builtin-ink",
+            "run_final_image2ppt_qa.py",
+        ):
+            self.assertIn(contract, skill)
+        self.assertRegex(skill, r"(?i)(local|本地).*(remote|远程)")
+        self.assertIn("visual_review_status", skill)
 
 
 if __name__ == "__main__":

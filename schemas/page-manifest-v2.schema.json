@@ -40,7 +40,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "kind", "representation"],
+        "required": ["id", "kind"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "kind": {
@@ -52,11 +52,81 @@
               "asset-sheet-separated",
               "source-preserving-local-cleanup",
               "imagegen",
-              "latex-rendered-formula"
+              "latex-rendered-formula",
+              "svg-reconstructed",
+              "vector-traced",
+              "source-extracted",
+              "image-edited"
             ]
           },
-          "path": {"type": "string"}
-        }
+          "path": {"type": "string"},
+          "source_type": {"$ref": "#/$defs/sourceType"},
+          "editability": {"$ref": "#/$defs/editability"},
+          "processing_method": {"type": "string", "minLength": 1, "pattern": "\\S"},
+          "reason": {"type": "string", "minLength": 1, "pattern": "\\S"},
+          "source_box_px": {"$ref": "#/$defs/boxPx"},
+          "source_bbox_px": {"$ref": "#/$defs/boxPx"},
+          "identity_evidence": {"type": "string", "minLength": 8},
+          "source_identity": {"type": "string", "minLength": 8},
+          "identity_preserved": {"type": "boolean"},
+          "contamination_check": {"$ref": "#/$defs/contaminationCheck"},
+          "contamination_checked": {"type": "boolean"},
+          "contamination_note": {"type": "string", "minLength": 4},
+          "contamination_status": {"enum": ["clean", "passed", "pass", "ok"]}
+        },
+        "allOf": [
+          {
+            "if": {
+              "not": {
+                "anyOf": [
+                  {"required": ["source_type"]},
+                  {"required": ["editability"]}
+                ]
+              }
+            },
+            "then": {"required": ["representation"]}
+          },
+          {
+            "if": {"required": ["processing_method"]},
+            "then": {"required": ["reason"]}
+          },
+          {
+            "if": {"required": ["reason"]},
+            "then": {"required": ["processing_method"]}
+          },
+          {
+            "if": {
+              "required": ["source_type"],
+              "properties": {"source_type": {"enum": ["native-object", "svg-reconstructed", "vector-traced", "source-extracted", "image-edited"]}}
+            },
+            "then": {"required": ["editability"]}
+          },
+          {
+            "if": {"properties": {"source_type": {"const": "native-object"}}, "required": ["source_type"]},
+            "then": {"properties": {"editability": {"const": "native-object"}}}
+          },
+          {
+            "if": {"properties": {"source_type": {"const": "svg-reconstructed"}}, "required": ["source_type"]},
+            "then": {
+              "required": ["path"],
+              "properties": {"editability": {"const": "svg-image"}}
+            }
+          },
+          {
+            "if": {"properties": {"source_type": {"const": "vector-traced"}}, "required": ["source_type"]},
+            "then": {
+              "required": ["path"],
+              "properties": {"editability": {"const": "svg-image"}}
+            }
+          },
+          {
+            "if": {"properties": {"source_type": {"const": "source-extracted"}}, "required": ["source_type"]},
+            "then": {
+              "required": ["path", "editability"],
+              "properties": {"editability": {"enum": ["raster-image", "svg-image"]}}
+            }
+          }
+        ]
       }
     },
     "background_strategy": {"type": "object"},
@@ -114,10 +184,148 @@
         }
       }
     },
-    "images": {"type": "array"},
-    "asset_provenance": {"type": "array"},
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "source_type": {"$ref": "#/$defs/sourceType"},
+          "editability": {"$ref": "#/$defs/editability"},
+          "processing_method": {"type": "string", "minLength": 1, "pattern": "\\S"},
+          "reason": {"type": "string", "minLength": 1, "pattern": "\\S"},
+          "source_box_px": {"$ref": "#/$defs/boxPx"},
+          "source_bbox_px": {"$ref": "#/$defs/boxPx"}
+        },
+        "allOf": [
+          {"if": {"required": ["processing_method"]}, "then": {"required": ["reason"]}},
+          {"if": {"required": ["reason"]}, "then": {"required": ["processing_method"]}},
+          {
+            "if": {"required": ["source_type"], "properties": {"source_type": {"enum": ["native-object", "svg-reconstructed", "vector-traced", "source-extracted", "image-edited"]}}},
+            "then": {"required": ["editability"]}
+          }
+        ]
+      }
+    },
+    "asset_provenance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "minLength": 1},
+          "source_type": {"$ref": "#/$defs/sourceType"},
+          "editability": {"$ref": "#/$defs/editability"},
+          "producer": {"type": ["string", "null"]},
+          "model": {"type": ["string", "null"]},
+          "transform": {"type": "string"},
+          "provenance_note": {"type": "string", "minLength": 1},
+          "processing_method": {"type": "string", "minLength": 1, "pattern": "\\S"},
+          "reason": {"type": "string", "minLength": 1, "pattern": "\\S"},
+          "source_box_px": {"$ref": "#/$defs/boxPx"},
+          "source_bbox_px": {"$ref": "#/$defs/boxPx"},
+          "identity_evidence": {"type": "string", "minLength": 8},
+          "source_identity": {"type": "string", "minLength": 8},
+          "identity_preserved": {"type": "boolean"},
+          "contamination_check": {"$ref": "#/$defs/contaminationCheck"},
+          "contamination_checked": {"type": "boolean"},
+          "contamination_note": {"type": "string", "minLength": 4},
+          "contamination_status": {"enum": ["clean", "passed", "pass", "ok"]}
+        },
+        "allOf": [
+          {"if": {"required": ["processing_method"]}, "then": {"required": ["reason"]}},
+          {"if": {"required": ["reason"]}, "then": {"required": ["processing_method"]}},
+          {
+            "if": {"required": ["source_type"], "properties": {"source_type": {"enum": ["native-object", "svg-reconstructed", "vector-traced", "source-extracted", "image-edited"]}}},
+            "then": {"required": ["editability"]}
+          },
+          {
+            "if": {"properties": {"source_type": {"const": "svg-reconstructed"}}, "required": ["source_type"]},
+            "then": {
+              "required": ["source", "editability"],
+              "properties": {"editability": {"const": "svg-image"}}
+            }
+          },
+          {
+            "if": {"properties": {"source_type": {"const": "vector-traced"}}, "required": ["source_type"]},
+            "then": {
+              "required": ["source", "editability"],
+              "properties": {"editability": {"const": "svg-image"}}
+            }
+          },
+          {
+            "if": {"properties": {"source_type": {"const": "source-extracted"}}, "required": ["source_type"]},
+            "then": {
+              "required": ["source", "editability"],
+              "anyOf": [
+                {"required": ["source_box_px"]},
+                {"required": ["source_bbox_px"]}
+              ],
+              "properties": {"editability": {"enum": ["raster-image", "svg-image"]}},
+              "allOf": [
+                {
+                  "anyOf": [
+                    {"required": ["identity_evidence"]},
+                    {"required": ["source_identity"]},
+                    {"required": ["identity_preserved"]}
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {"required": ["contamination_check"]},
+                    {"required": ["contamination_checked"]},
+                    {"required": ["contamination_status"]}
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
     "formula_inventory": {"type": "array"},
     "image2ppt_region_decomposition": {"type": "object"}
+  },
+  "$defs": {
+    "sourceType": {
+      "enum": [
+        "native-object",
+        "svg-reconstructed",
+        "vector-traced",
+        "source-extracted",
+        "image-edited",
+        "latex-rendered-formula",
+        "asset-sheet-separated",
+        "imagegen",
+        "user-provided",
+        "user-approved-rasterization"
+      ]
+    },
+    "editability": {
+      "enum": ["native-object", "svg-image", "raster-image"]
+    },
+    "boxPx": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "number", "minimum": 0},
+        {"type": "number", "minimum": 0},
+        {"type": "number", "exclusiveMinimum": 0},
+        {"type": "number", "exclusiveMinimum": 0}
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "contaminationCheck": {
+      "type": "object",
+      "required": ["passed", "observation"],
+      "properties": {
+        "passed": {"const": true},
+        "observation": {"type": "string", "minLength": 4},
+        "note": {"type": "string", "minLength": 4}
+      },
+      "additionalProperties": true
+    }
   },
   "additionalProperties": true
 }

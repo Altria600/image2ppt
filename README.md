@@ -1,98 +1,162 @@
 <div align="center">
-  <p>
-    <img src="assets/readme/banner.png" alt="Image2PPT：从图片和 PDF 重建可编辑 PowerPoint" width="100%">
-  </p>
+  <p><img src="assets/readme/hero-zh.svg" alt="让每一页，重新可编辑。" width="960"></p>
   <h1>Image2PPT</h1>
-  <p>把图片型幻灯片、扫描 PDF、图片型 PPT/PPTX 重建成对象级可编辑 PowerPoint</p>
+  <p>从一张静态图片，回到可以继续修改的演示文稿。</p>
   <p>
+    <a href="https://github.com/Altria600/image2ppt/releases/tag/v1.3.0"><img alt="Release" src="https://img.shields.io/badge/release-v1.3.0-2563eb"></a>
+    <a href="https://github.com/Altria600/image2ppt"><img alt="Stars" src="https://img.shields.io/github/stars/Altria600/image2ppt?style=flat"></a>
     <a href="https://github.com/Altria600/image2ppt/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Altria600/image2ppt/actions/workflows/ci.yml/badge.svg"></a>
-    <a href="#快速开始"><img alt="Install" src="https://img.shields.io/badge/install-Claude%20Code%20%7C%20Codex-8b5cf6"></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-2ea44f"></a>
-    <a href="README_EN.md"><img alt="Language" src="https://img.shields.io/badge/language-中文%20%7C%20English-1f6feb"></a>
-    <img alt="Version" src="https://img.shields.io/badge/version-1.2.0-8b5cf6">
+  </p>
+  <p>
+    <a href="#开始使用"><img alt="Install" src="https://img.shields.io/badge/install-Codex%20%7C%20WorkBuddy-1D6653"></a>
+    <a href="README_EN.md">English</a>
   </p>
 </div>
 
-Image2PPT 面向需要保留原稿版式的图片转 PPTX 场景。它把源稿拆成文字、原生形状、连接线和独立图片资产，再用统一的字体、对齐和渲染检查重新组装页面。
+一页旧方案、一张科研示意图、一份只剩扫描件的资料。你想改的，往往只是一个字、一根箭头，或一个数字。
 
-它适合处理元素多、层级密、局部关系容易错位的商业 PPT、科研流程图、时间线、卡片式长图和扫描 PDF。输出的重点是**对象级可编辑**：文字可以改，卡片和线条可以移动，复杂插画也可以作为独立图片替换或调整。
+**Image2PPT，让这些修改重新成为可能。**
 
-## 能编辑到什么程度
+把图片、扫描 PDF 或图片型 PPT 交给 Agent，它会按页面结构重建文字、形状与独立素材，再生成可编辑的 PPTX。留下原稿的内容与关系，也为下一次修改留下空间。
 
-| 源稿对象 | PPTX 输出 | 处理原则 |
+<p align="center">
+  <a href="https://github.com/Altria600/image2ppt/releases/download/v1.3.0/image2ppt-portable-1.3.0.zip">下载 v1.3.0 便携包</a>
+  ·
+  <a href="#开始使用">快速开始</a>
+  ·
+  <a href="#案例先看复杂页面">查看案例</a>
+</p>
+
+## 案例：先看复杂页面
+
+从商业长图里的时间线、卡片与文字，到科研图中的节点、箭头与插画，重建的重点始终是：**保留关系，找回可以单独修改的对象。**
+
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>商业页面 · 源图</strong><br><img src="assets/readme/business-source.png" alt="商业页面源图" width="100%"></td>
+    <td align="center" width="50%"><strong>商业页面 · 重建</strong><br><img src="assets/readme/business-converted.png" alt="商业页面重建结果，显示可选择对象" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><strong>科研图 · 源图</strong><br><img src="assets/readme/scientific-source.png" alt="科研图源图" width="100%"></td>
+    <td align="center" width="50%"><strong>科研图 · 重建</strong><br><img src="assets/readme/scientific-converted.png" alt="科研图重建结果，显示可选择对象" width="100%"></td>
+  </tr>
+</table>
+
+<sub>以上为仓库既有案例，不是 v1.3.0 新测。右侧选框展示对象选择状态，放映时不会出现；可点击图片查看大图。不同输入的还原效果，以实际对照验收为准。</sub>
+
+<details>
+<summary>查看历史案例的局部放大对照</summary>
+
+<p align="center"><img src="assets/readme/clarity-comparison.png" alt="历史案例的局部清晰度对照" width="100%"></p>
+<p align="center"><img src="assets/readme/detail-comparison.png" alt="历史案例的复杂关系与细节对照" width="100%"></p>
+
+</details>
+
+## 能改到哪一步
+
+简单的地方，保留编辑自由；复杂的地方，保留原稿质感。
+
+| 页面对象 | PPTX 中的结果 | 你可以怎样继续编辑 |
 | --- | --- | --- |
-| 标题、正文、编号、标签 | PowerPoint 原生文本框 | 保留文字内容、字号、字体、颜色、位置和对齐关系 |
-| 卡片、边框、圆形、分隔线 | PowerPoint 原生形状 | 记录源图像素坐标和圆角尺寸，重复对象使用同一对齐组 |
-| 直线、折线、箭头、连接关系 | PowerPoint 原生连接线或形状 | 保留端点、方向、线型和箭头归属 |
-| 复杂插画、照片、纹理、无法稳定测量的视觉局部 | 独立图片资产 | 只保留实际局部，不用整页截图覆盖可编辑对象 |
-| 低分辨率或缺失字体造成的细节 | 需要人工复核 | 输出会记录渲染差异，不把不确定结果伪装成完全一致 |
+| 文字、卡片、表格结构、普通箭头 | 原生文本框、形状与连接线 | 改字、改色、移动、调整大小与连线 |
+| 扁平图标、可描摹的局部轮廓 | 独立 SVG 矢量图片 | 移动、缩放、替换；需要细改时编辑随附 SVG |
+| 照片、3D、光影与复杂插画 | 保留原稿身份的独立图片 | 单独移动、调整与替换，保留复杂视觉细节 |
 
-复杂视觉保留为独立图片，并不等于整页不可编辑。文字、卡片、连接线和可测量结构仍然会拆开输出。
+同一页可以混用这三种方式。复杂素材优先从原稿分离，只有提取不足或需要修复遮挡时，才使用已授权的图像编辑工具。SVG 图片不等于 PowerPoint 原生路径，交付时会说明实际可编辑范围。
 
-### 工作流
+## 开始使用
 
-```mermaid
-flowchart LR
-  A[图片 / PDF / 图片型 PPTX] --> B[源稿归一化]
-  B --> C[区域与对象测量]
-  C --> D[文字、形状、连接线重建]
-  C --> E[复杂局部资产分离]
-  D --> F[页面级 PPTX 构建]
-  E --> F
-  F --> G[结构验证与渲染 QA]
-```
+### 先选一种入口
 
-每一页都使用同一份 `manifest.json` 作为构建来源。`text_style_id`、`alignment_group` 和 `role` 用来约束重复文字、编号框和卡片的字体、字号、行距与对齐锚点，避免出现同一板块里字号漂移或编号框不齐。
-
-## 快速开始
-
-### 在 Codex 中安装
+- **下载便携包**：获取 [image2ppt-portable-1.3.0.zip](https://github.com/Altria600/image2ppt/releases/download/v1.3.0/image2ppt-portable-1.3.0.zip)，解压后把整个目录交给宿主 Agent 使用。
+- **Codex repo skill**：把本目录（或解压后的便携包目录）复制到目标项目的 `.agents/skills/image2ppt/`，不做全局安装。
+- **WorkBuddy**：下载上面的便携 ZIP，在技能页面通过本地技能包导入。自定义版本也可以在仓库根目录运行下面的打包命令。
 
 ```bash
-mkdir -p .agents/skills
-git clone https://github.com/Altria600/image2ppt.git .agents/skills/image2ppt
+python3 scripts/package_skill.py --output dist/image2ppt.zip
 ```
 
-然后在对话中使用：
+### 第一次运行
+
+安装 Skill 后，可以直接把这段话发给 Agent：
 
 ```text
-使用 $image2ppt，把 input.pdf 按原页面比例重建成对象级可编辑 PPTX。
-文字、卡片、连接线和箭头需要独立可编辑；复杂插画可以保留为独立图片资产；完成渲染 QA 后再交付。
+使用 image2ppt，把我提供的图片或 PDF 还原为可编辑 PPTX。
+保留原稿版式；文字、卡片和普通箭头独立可编辑；
+简单图标用 SVG，复杂插画尽量保留原稿；
+先用本地能力，调用外部服务前说明范围，完成实际渲染核对后交付。
 ```
 
-### 在 Claude Code 中安装
+建议使用项目内 Python 3.10+ 虚拟环境，不依赖全局 `image2ppt` 命令：
 
 ```bash
-mkdir -p .claude/skills
-git clone https://github.com/Altria600/image2ppt.git .claude/skills/image2ppt
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+./.venv/bin/python cli/image2ppt/cli.py doctor --json
+./.venv/bin/python cli/image2ppt/cli.py prepare input.pdf \
+  --out-root output/image2ppt --image-backend local-only
 ```
 
-### 本地运行 CLI
+`prepare` 负责建立本次输入和页面运行目录；完整的逐页重建、构建、渲染 QA、记录和最终装配，按 [SKILL.md](SKILL.md) 的页面生命周期执行。输入也可以是图片或图片型 PPT/PPTX。
+
+<details>
+<summary>macOS：源码方式的完整步骤</summary>
 
 ```bash
-python .agents/skills/image2ppt/cli/image2ppt/cli.py doctor --json
-python .agents/skills/image2ppt/cli/image2ppt/cli.py prepare input.pdf --out-root output/image2ppt
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+./.venv/bin/python cli/image2ppt/cli.py doctor --json
+./.venv/bin/python cli/image2ppt/cli.py prepare /path/to/input.pdf \
+  --out-root output/image2ppt --image-backend local-only
 ```
 
-单页或多页重建应由 Agent 按 `SKILL.md` 的页面生命周期完成：准备输入、逐页重建、构建 PPTX、渲染检查、记录结果、最终装配。
+需要视觉验收时，在目标机器安装并使用 LibreOffice；本仓库本次 v1.3.0 已在 macOS + LibreOffice 完成真实 source → PPTX 验收。字体、SVG、透明度、箭头和公式仍应以最终使用环境的实际 render 为准。
 
-## 配置
+</details>
 
-`config.yaml` 只用于本地机器，已被 Git 忽略；不要把 Token 或 API Key 写入仓库。需要手动配置时，可从 `config.example.yaml` 复制模板；如果要指定其他配置目录，可设置 `IMAGE2PPT_CONFIG_HOME`。
+<details>
+<summary>Windows PowerShell：源码方式的完整步骤</summary>
 
-### 可选的在线 OCR
-
-默认的 `builtin-ink` 只能测量文字区域，不能读取文字内容。需要更好的文字识别时，可以在百度 AI Studio 申请 [PaddleOCR Access Token](https://aistudio.baidu.com/account/accessToken)，再写入本地配置：
-
-```yaml
-PADDLE_OCR_TOKEN: "你的 Token"
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe cli\image2ppt\cli.py doctor --json
+.venv\Scripts\python.exe cli\image2ppt\cli.py prepare C:\path\to\input.pdf `
+  --out-root output\image2ppt --image-backend local-only
 ```
 
-在线 OCR 会把当前任务页面上传到百度服务。敏感材料应使用离线模式，或先确认数据合规范围。
+Windows、PowerPoint/WPS 和 WorkBuddy 的真实宿主验收尚未在本仓库完成；请记录目标机的 Python、字体、Office/renderer 版本和实际 render 结果。不要使用 `pipx`、系统级全局安装或另一个 Skill 代替当前目录的运行时。
 
-### 可选的图片生成
+</details>
 
-复杂局部图片优先使用 Agent 内置图像工具。需要兼容第三方 OpenAI Images API 时，可在本地 `config.yaml` 配置：
+## 路线图
+
+先理解页面区域，再按对象测量和分流；最后把结构检查与实际渲染对照放在同一条交付链上。
+
+<p align="center"><img src="assets/readme/routing-zh.svg" alt="Image2PPT 对象路由示意：源稿、对象分流、PPTX 与渲染验收" width="960"></p>
+
+1. **读入源稿**：保留页面比例、顺序和必要的 speaker notes。
+2. **测量与分流**：文字、卡片、表格和普通箭头走原生对象；扁平图标和可追踪路径走 SVG；复杂视觉保留有边界的原稿资产。
+3. **构建与复核**：从 `manifest.json` 生成 PPTX，检查对象结构、来源记录、字体与溢出，再用实际 renderer 对照源图。
+
+## 验证边界
+
+<details>
+<summary>打开 v1.3.0 的验证口径</summary>
+
+- 本地完整回归：**217 tests passed**；后续路由、provider、package 和 metadata 的收尾复测：**62 项 targeted tests passed**（与完整套件有重叠）。
+- 已验证：本地 Python 3.11、LibreOffice 渲染，以及真实 source → PPTX 的页面级流程；SVG PNG fallback、原稿局部提取守卫和原生测量箭头也有离线测试覆盖。
+- 尚未声称：Windows/WorkBuddy 实际宿主、目标 PowerPoint/WPS 渲染、真实外部 OCR/图像 API 调用。CI 已准备 Windows/macOS 离线 job，远程运行结果以发布后的 workflow 为准。
+- 没有 renderer 时，`page build`、manifest/OOXML 结构检查仍可运行，但不能把它们称作视觉 QA 通过；未验收页面必须明确保留为 pending/unsupported。
+
+</details>
+
+## 技术细节与配置
+
+默认 backend 是 `local-only`：本地解析、原稿局部提取、SVG、可选 VTracer 和确定性构建，不读取未选择的凭据，也不联网。`host-image-tool`、`builtin-imagegen`、`external-import`、`openai-compatible-api` 和 `codex-oauth` 都必须显式选择，失败不会静默切换 provider。
+
+`config.yaml` 只用于本机，Git 应忽略它；`IMAGE2PPT_CONFIG_HOME` 可指定配置目录。复制 [config.example.yaml](config.example.yaml) 后只填本地秘密：
 
 ```yaml
 OPENAI_API_KEY: "你的 API Key"
@@ -101,78 +165,14 @@ IMAGE2PPT_IMAGE_BACKEND: "openai-compatible-api"
 IMAGE2PPT_IMAGE_MODEL: "供应商提供的模型 ID"
 ```
 
-图片生成或编辑只接收当前任务所需的提示词和页面图片；敏感内容应选择离线方案或经过批准的服务。
+远程 OCR 默认关闭；只有明确允许时在 `prepare` 或 `run hints` 添加 `--allow-remote-ocr`。可选的本地 VTracer 安装为 `python -m pip install vtracer`。详细参数、字段和恢复路径见 [references/runtime-dependencies.md](references/runtime-dependencies.md)、[references/page-decision-tree.md](references/page-decision-tree.md)、[references/manifest-schema.md](references/manifest-schema.md) 和 [references/qa-contract.md](references/qa-contract.md)。
 
-## 输出与验收
+## 进一步阅读与许可
 
-一次完整运行会生成：
+完整页面生命周期、单 Agent 多页串行方式和 worker ownership 见 [SKILL.md](SKILL.md) 与 [references/workflow.md](references/workflow.md)。
 
-- 最终 `.pptx`，以及每页的页面级 `.pptx`；
-- `manifest.json`，记录文字、形状、图片、坐标、字体和资产来源；
-- `validation.json`、区域拆分报告、渲染 PNG 和视觉核对证据。
+本地整合版以 [Altria600/image2ppt](https://github.com/Altria600/image2ppt) 为基础，保留上游 [Paul-Jeo/Image2PPT](https://github.com/Paul-Jeo/Image2PPT) 的 MIT 许可证与归属；Cell-lct 仅作为矢量处理流程参考，未复制其未声明许可的代码。
 
-交付前至少检查：
-
-1. 文字内容没有遗漏，文字仍是独立文本对象；
-2. 卡片、边框、连接线和箭头可以单独选择和移动；
-3. 复杂图片是有来源记录的局部资产，没有整页截图压住文字；
-4. PowerPoint 或 LibreOffice 渲染后，页面比例、字体、位置和层级没有明显漂移。
-
-## 案例
-
-下面展示仓库内的同源案例：第一行是复杂商业 PPT，第二行是科研流程图；每组左侧为源图，右侧为对象级重建结果。重建结果中的选框只用于证明对象可独立编辑，放映时不会出现。
-
-<table>
-  <tr>
-    <td align="center" width="50%"><strong>商业 PPT · 源图</strong><br><img src="assets/readme/business-source.png" alt="商业 PPT 源图" width="100%"></td>
-    <td align="center" width="50%"><strong>商业 PPT · 对象级重建</strong><br><img src="assets/readme/business-converted.png" alt="商业 PPT 对象级重建结果" width="100%"></td>
-  </tr>
-  <tr>
-    <td align="center" width="50%"><strong>科研流程图 · 源图</strong><br><img src="assets/readme/scientific-source.png" alt="科研流程图源图" width="100%"></td>
-    <td align="center" width="50%"><strong>科研流程图 · 对象级重建</strong><br><img src="assets/readme/scientific-converted.png" alt="科研流程图对象级重建结果" width="100%"></td>
-  </tr>
-</table>
-
-### 局部清晰度对比
-
-这组放大图用于检查图标轮廓、文字边缘和细线条的保留情况：
-
-<p align="center"><img src="assets/readme/clarity-comparison.png" alt="复杂局部清晰度对比" width="100%"></p>
-
-### 复杂关系与细节还原
-
-这组流程图用于检查知识图谱节点、关系线、箭头方向和局部排版：
-
-<p align="center"><img src="assets/readme/detail-comparison.png" alt="复杂流程图细节还原对比" width="100%"></p>
-
-### 项目结构
-
-```text
-SKILL.md                         # Agent 使用说明与页面生命周期
-cli/image2ppt/                   # 本地 CLI 与确定性构建运行时
-references/                      # OCR、区域、字体、资产和 QA 契约
-schemas/page-manifest-v2.schema.json
-scripts/                         # 渲染、结构检查、最终 QA
-tests/                           # 离线契约与端到端测试
-```
-
-## 开发与测试
-
-```bash
-python3 -m pytest -q
-```
-
-当前仓库的完整测试结果为 `177 passed`。渲染 QA 仍应在实际使用的 PowerPoint 或 WPS 中复核，因为不同平台的字体回退和绘制引擎可能不同。
-
-### 边界
-
-- 本项目用于还原已有视觉页面，不用于根据笔记或提纲从零创作演示文稿。
-- 复杂插图、照片和无法可靠测量的效果可能保留为独立图片，不能承诺所有像素都变成原生形状。
-- 低分辨率输入、缺失字体和不同 Office 渲染引擎会限制还原精度；以源稿对比和实际渲染 QA 为准。
-- 在线 OCR、图片生成和图片编辑会把必要的任务数据发送到相应服务；敏感材料请使用离线方案。
-
-## License
+如果它帮你省下了一次重画，欢迎在 GitHub 点个 [Star](https://github.com/Altria600/image2ppt)，让更多人找回可编辑的原稿。
 
 本项目采用 [MIT License](LICENSE)。
-
-本定制版基于上游 [Paul-Jeo/Image2PPT](https://github.com/Paul-Jeo/Image2PPT)，保留原项目版权与许可证。

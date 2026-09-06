@@ -11,6 +11,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from PIL import Image
+from platform_tools import discover_libreoffice, libreoffice_environment
 
 
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
@@ -234,7 +235,18 @@ def extract_image_based_pptx_pages(pptx_path, pages_dir):
 
 
 def find_soffice():
-    return shutil.which("soffice") or shutil.which("libreoffice")
+    return discover_libreoffice()
+
+
+def run_office_conversion(soffice, input_path, out_dir, target_format):
+    with tempfile.TemporaryDirectory(prefix="image2ppt-office-") as name:
+        work_dir = Path(name)
+        subprocess.run(
+            [soffice, "--headless", f"-env:UserInstallation={(work_dir / 'profile').as_uri()}",
+             "--convert-to", target_format, "--outdir", str(out_dir), str(input_path)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=libreoffice_environment(work_dir),
+        )
 
 
 def convert_office_to_pdf(input_path, out_dir):
@@ -242,13 +254,7 @@ def convert_office_to_pdf(input_path, out_dir):
     if not soffice:
         raise RuntimeError("No local Office converter is available for this input.")
     out_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(out_dir), str(input_path)],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    run_office_conversion(soffice, input_path, out_dir, "pdf")
     pdfs = sorted(out_dir.glob("*.pdf"))
     if not pdfs:
         raise RuntimeError(f"Office conversion did not produce a PDF in {out_dir}")
@@ -262,13 +268,7 @@ def convert_ppt_to_pptx(input_path, out_dir):
     if not soffice:
         raise RuntimeError("No local Office converter is available to normalize .ppt input.")
     out_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [soffice, "--headless", "--convert-to", "pptx", "--outdir", str(out_dir), str(input_path)],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    run_office_conversion(soffice, input_path, out_dir, "pptx")
     pptxs = sorted(out_dir.glob("*.pptx"))
     if not pptxs:
         raise RuntimeError(f"Office conversion did not produce a PPTX in {out_dir}")

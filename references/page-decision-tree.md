@@ -1,304 +1,84 @@
 # Page Decision Tree
 
-This file is the single source of truth for page object decisions. Field contracts live in `manifest-schema.md`; command syntax lives in `cli-helper.md`.
+本文件是单页对象来源的唯一决策入口；字段见 [manifest-schema.md](manifest-schema.md)，命令见 [cli-helper.md](cli-helper.md)。每页按以下顺序工作：
 
-Every `source.png` is judged in three steps, in this order:
+1. 页面清单和语义区域。
+2. 背景与遮挡关系。
+3. 前景对象与来源/编辑性。
+4. 原生文本、结构对象、公式和 QA 证据。
 
-1. Background recognition and repair.
-2. Foreground asset separation.
-3. PPT native element reconstruction.
+先决定“这个对象是什么、来源是什么、实际能编辑到什么程度”，再写 manifest。不要先铺一张整页底图，再把对象盖在上面。
 
-The order exists because steps 1-2 decide object sources and step 3 consumes those decisions. Nativizing text and layout first locks in wrong choices: text that belongs to a logo, a UI screenshot, or a to-be-separated asset must not become a native text box, and which text needs clean-base removal depends on the background decision. Define the boundaries between background, foreground, and native structure first; then write the manifest. Submit image jobs serially through `page_request.json.image_backend`; its field contract lives in `manifest-schema.md`, and fallback CLI syntax lives in `cli-helper.md`. Do not parallelize page-local image jobs through a batch interface because concurrent asset-sheet calls make rate limits, retries, and reconciliation failures harder to diagnose.
+## 预决策清单
 
-## Contents
+在 manifest 中盘点：
 
-- [Common Failure Mode: False Progress](#common-failure-mode-false-progress)
-- [Pre-Decision: Page Inventory](#pre-decision-page-inventory)
-- [1. Background Recognition and Repair](#1-background-recognition-and-repair)
-- [2. Foreground Asset Separation](#2-foreground-asset-separation)
-- [3. PPT Native Element Reconstruction](#3-ppt-native-element-reconstruction)
-- [Final Self-Check](#final-self-check)
-- [Fix versus Warning](#fix-versus-warning)
+- 页面尺寸、源图尺寸、背景类型和被遮挡位置；
+- 所有可读文字、文字等级、字高、行距、密度和对齐轨道；
+- 卡片、表格、圆形、边框、线、普通箭头、图表骨架等结构对象；
+- 扁平图标、照片、纹理、插画、截图、徽章和其他风格资产；
+- 公式候选及其文本/图片编辑边界；
+- 每个对象的 `source_type`、`editability`、源文件、局部边界和 z-order；
+- 矩形圆角：直角、小半径、大半径或 pill。
 
-## Common Failure Mode: False Progress
+结构化页先分 3–8 个语义区域；真正简单的页可用 1–2 个。每个区域都必须落到标准 `text_boxes[]`、`shapes[]` 或 `images[]`，区域证据写回同一 manifest。
 
-Do not create a "good enough" editable draft by rebuilding text and layout while cropping or approximating foreground assets. This is false progress: it may pass deterministic validation but it fails the object-source contract. Deterministic validation is a structure gate, not a waiver — `validation.json.passed=true` never makes a forbidden foreground fallback acceptable.
+## 1. 背景
 
-When a page has complex foreground visuals, first prove the foreground asset workflow is feasible. If it is not, stop with a page failure before building `manifest.json`. Do not convert the missing workflow into a warning, a direct source crop, a native-shape approximation, an emoji/text-symbol substitute, or any other fallback.
+可直接用本地构建的背景包括纯色、简单渐变、规则纹理、普通阴影、空白区域和卡片/表格的填充。复杂照片、空间场景或插画背景只有在文字/图标遮挡且本地结构无法复原时，才需要选定的图像编辑工具做局部背景修复。
 
-## Pre-Decision: Page Inventory
+重用原稿局部前确认：它没有将被重建的文字或前景对象，不会造成重复，也不是整页、整卡片、整表或整图表的截图。背景策略应记录 `mode`、保留的构图/透视/颜色/光照/关键细节、移除的遮挡对象和与源图对比后的 `comparison_note`。
 
-Build a complete inventory before deciding anything, so that no object's source is chosen ad hoc later:
+如果需要图像编辑，编辑目标是“同一背景去除待重建对象”，不是同主题新图。必须记录选定 backend、输入、提示、producer/model 和原因；工具失败时报告 blocked，不切换到未知服务。
 
-- Page size and page type.
-- All readable text, with source glyph height, container height, line spacing, and density for each text level.
-- Background type — solid color, gradient, regular texture, photo, illustration, dashboard, spatial/product image, complex graphic background — and whether it is occluded by text, icons, labels, stickers, hand-drawn marks, or other foreground objects that will be rebuilt later.
-- Foreground visual objects: icons, pictograms, logo-like marks, foreground photos, screenshots, image blocks, textures, illustrations, people, plants, devices, hand-drawn marks, stickers, decorative lines, badges.
-- PPT native element candidates: text, text boxes, cards, panels, tables, axes, lines, flow boxes, dividers, simple arrows.
-- Formula candidates: objective functions, constraints, matrices, fractions, roots, cases, multiline equation groups, ordinary math expressions. List formulas separately; never group them with ordinary text.
-- Corner geometry for every rectangle/card/table outline: straight, slight radius, obvious radius, pill.
+## 2. 前景对象
 
-Record the inventory in `visual_inventory`, and the decisions of the next three sections in `background_strategy` and `quality_checks` (field contracts in `manifest-schema.md`; all four `quality_checks` flags must end up `true`).
+按以下规则选择来源：
 
-## 1. Background Recognition and Repair
+1. 文字默认为原生文本框；品牌字标、地图底图文字、截图内不要求编辑的小字等例外必须说明。
+2. 卡片、表格、普通连接线、圆形、简单图表骨架和普通箭头按测量结果使用原生对象。
+3. 扁平图标/简单标记可以忠于源稿地重建为 SVG，记录 `source_type: svg-reconstructed`、`editability: svg-image`、`source_box_px` 和 `identity_evidence`。
+4. 源文件有可追踪路径时可使用本地 VTracer，记录 `source_type: vector-traced`、`editability: svg-image` 和 `source_box_px`；source 必须是页面内栅格输入。安装是可选的，不是隐式远程依赖。
+5. 照片、纹理、复杂插画和无法可靠测量的数据视觉优先从原稿提取有边界的局部，记录 `source_type: source-extracted`、`source_box_px`、`identity_evidence` 和通过的 `contamination_check`；保留实际 `raster-image` 或 `svg-image` 编辑性。
+6. 只有局部提取不够、需要遮挡修复或用户明确要求时才使用显式图像工具，记录 `source_type: image-edited`、`transform: image-edit` 和完整 provenance。不要把编辑后的相似图误报为原稿提取，也不要因图像工具缺失而用占位符。
 
-Step 1 decides only the background; do not process foreground assets or text yet. Record the outcome in `background_strategy` (field contract in `manifest-schema.md`), including a `comparison_note` written after comparing the result against the source.
+所有来源都必须保持源稿身份，不能用整页/整卡片/整图表绕过编辑性，不能因为“看起来能画”就把复杂身份重绘为另一个图标。资产应绑定真实局部边界，并在 `asset_provenance` 中记录来源、变换和限制。
 
-### 1.1 Backgrounds That Do Not Need Image Tools
+## 3. 原生重建
 
-Rebuild these directly with PPT structural objects or the deterministic runtime — calling the image backend for them wastes a generation and risks drift:
+### 文字
 
-- Solid-color backgrounds.
-- Simple gradients.
-- Ordinary cards, panels, and container fills.
-- Table lines, axes, gridlines, chart frames.
-- Regular repeated textures, regular divider bands, simple shadows.
-- Blank background regions not occluded by foreground.
+所有主要文字必须是真实、可见、可选择的文本框。使用 `text_hints.json` 的源像素框和字高作为测量提示，但由 agent 对照源图确认字符。新页设置 `typography_policy: governed`，同级文字使用共享 `text_style_id` 和 `alignment_group`/`role`。遇到溢出时先改语义换行、框或布局，再统一调整整个同级组；不能单独缩小一个框隐藏问题。
 
-Record this kind of background as `background_strategy.mode: native-or-script` or an equivalent mode.
+`text_hints.json` 的 `box_px`、glyph height、CJK/Latin 字号候选和 `size_group` 都是 advisory：提示可能漏字、合并行或误识别。用 `page hints <page-dir>` 只重建一页，用 `run hints <run-dir>` 重建整次运行；远程 OCR 仍需当前命令显式带 `--allow-remote-ocr`，否则只用本地几何。主要文字不能用隐藏、透明、1 pt 或画外文本伪装。
 
-### 1.2 Reusable Background Regions
+### 公式
 
-An existing background region may be reused as-is only when all of these hold:
+把公式转写为 LaTeX，并用本地 `formula render-latex` 输出 SVG/PNG 与 manifest fragment。编译器或转换器缺失、编译失败或输出缺失时，页保持失败；只有用户明确批准该公式缺失，且 `formula_inventory` 记录具体批准，才可交付。
 
-- It contains no text, labels, icons, stickers, hand-drawn marks, or other foreground objects that need removal.
-- Reusing it will not create a duplicate "one copy in the background, another copy as editable objects" problem.
-- It is not a full-page `source.png` with native text overlaid.
-- It is a background/illustration area within the page — not a whole card, whole table, or whole chart screenshot used to bypass editability.
+公式不是普通文字。不要用 Unicode 上下标、源图局部或多个文本框代替。`latex-rendered-formula` 图片仍是 `svg-image`/`raster-image`，不能宣称为可编辑方程对象。
 
-### 1.3 Backgrounds That Need Image Tool Repair
+### 结构与箭头
 
-Use the image-edit path selected by `page_request.json.image_backend` for background repair or clean bases when:
+简单可测量的卡片、圆、边框、线、表格和连接器保持 native-object。普通箭头必须一个对象并将箭头头部放在同一连接线/AutoShape；箭头标签按旁置文本或 AutoShape 内文字归属，不能创建重复文字。
 
-- Complex photos, spaces, real product images, complex dashboards, or complex illustrated backgrounds are occluded by foreground text or icons.
-- Occluded areas need completion after removing text, labels, icons, stickers, or hand-drawn marks.
-- Background and foreground are stuck together and native shapes cannot preserve source identity.
+圆角按源图分类：直角用 `rect`；小半径、大半径和 pill 用 `roundRect` 并写 `source_corner_radius_px`。不按个人审美默认圆角。建议 z-index 为背景 0、结构 10–20、局部资产 30、可编辑文字 40+；同一对象不能同时出现在图片层和 native 层。
 
-The clean base target is the same background with the to-be-rebuilt foreground removed — not a new image with a similar theme. The edit prompt must treat the source as both the edit target and strict visual reference, and must state:
+PDF 有真实文字或 vector path 时先检查并提取，不能无条件整页栅格化。表格、卡片、dashboard、图表骨架仍按对象重建；复杂局部仅限真实边界。对复杂资产定义一个 source-consistent style anchor，先校准代表性资产再扩展同类处理。
 
-- Preserve: original aspect ratio, composition, perspective, object positions, colors, lighting, materials, textures, depth of field, and background identity.
-- Remove: readable text, labels, numbers, icons, stickers, badges, hand-drawn marks, and decorative objects that will be rebuilt later.
-- Forbid: new rooms, new dashboards, new products, new camera angles, new object positions, different lighting, pseudo-text, watermarks, blurry patches, or smear artifacts.
+## 最终自检
 
-If the occlusion is small, prefer local completion or a small patch rather than letting the image backend reimagine the whole background.
+在记录页面前检查：
 
-### 1.4 Dashboard Is Not Background by Default
+- `manifest.json` 能独立构建，所有路径位于页面目录；
+- `text_inventory`、`visual_inventory` 和 positioned objects 无遗漏，来源/编辑性/provenance 对得上；
+- 没有整页、整卡片、整表或整图表图片覆盖可编辑对象；
+- SVG 无脚本、远程引用或栅格伪装，栅格资产边界真实；
+- 字体、字号、行距、对齐轨道、圆角和 z-order 与源图一致；
+- 普通箭头对象数为一，复合图节点/边锚点完整；
+- 有渲染器时完成源图对 render 的逐项视觉核对；无渲染器时明确记录 QA 未验收；
+- `validation.json` 顶层 `passed` 只有在全部必需门禁完成后才为 true。
 
-A dashboard is not background, and it is not a single image block to screenshot wholesale. Dashboard titles, numbers, tables, axes, legends, ordinary chart elements, metric cards, filters, and labels are decomposed in step 3 into native text and structural objects.
+结构错误、缺失对象、身份漂移、公式失败和无渲染证据不能写成普通 warning。可接受的 warning 只能是已经通过来源合同后的轻微抗锯齿、字体回退或非关键装饰差异，并需在 QA 中具体说明。
 
-Only these areas may be handled as background or image regions:
-
-- Maps and heatmaps.
-- Complex screenshot base images.
-- Complex chart image regions whose data cannot be reliably restored.
-- Complex textures or base imagery that function as visual background and will not be duplicated by later native objects.
-
-Never screenshot a whole dashboard, whole table, whole card, or whole chart to skip editable structure.
-
-## 2. Foreground Asset Separation
-
-Step 2 decides only the source of non-text foreground visual objects. Every foreground object enters `visual_inventory` before its source is chosen.
-
-### 2.1 Foreground Assets Must Use Image Edit Separation
-
-Every non-text foreground visual object must be separated through the image-edit asset-sheet workflow selected by `page_request.json.image_backend`, including:
-
-- Foreground photos, foreground screenshots, video covers, foreground image blocks, map fragments, chart-image fragments, and rectangular illustrations.
-- Icons, pictograms, symbols, logo-like marks.
-- Badges, stickers, tapes, stamps, corner tags.
-- Hand-drawn marks, hand-drawn arrows, decorative underlines, circles, checkmarks, crosses.
-- Complex arrows, icon-like nodes, objects with texture or shadow.
-- Semantic small icons, trend icons, warning symbols, and status symbols in dashboards or charts.
-- Leaves, plants, people, animals, computers, phones, devices, scene illustrations, and any other non-text object that carries page style.
-
-Do not approximate these with native primitives, even when one appears to be made of circles, lines, rectangles, or ellipses — the criterion is not "can it be drawn" but whether it is a foreground visual asset rather than a layout primitive. Do not substitute direct source-image snippets for source-faithful separation. Do not hand-draw or assemble foreground visual objects with local Python/Pillow/SVG/HTML/CSS code; deterministic tools are only for normalization, recording, background removal, splitting, formula rendering, building, validation, and QA.
-
-There is no fallback path. If asset-sheet separation cannot produce a compliant asset, the page is blocked until the asset workflow is fixed or the user explicitly changes the requirements for that exact object. Do not downgrade the missing separation to a warning; do not record, finalize, or deliver the fallback.
-
-### 2.2 Asset Sheet Prompt Principles
-
-An asset sheet is source-faithful separation, not redraw. The generation prompt must require:
-
-- Separate existing objects from the source.
-- Preserve original shapes, strokes, colors, proportions, internal spacing, texture, and visual identity.
-- Use a flat chroma-key background; choose the key color based on the subject colors in `visual_inventory`.
-- Put as many icons and foreground visual objects as practical onto one sparse asset sheet. Create multiple asset sheets only when a single sheet cannot fit all required objects with clear separation.
-- Every object complete, not touching or overlapping other objects, with generous empty space between neighboring objects and sufficient outer padding so `process-sheet` can split each icon/object cleanly.
-- Object count and order match `visual_inventory`.
-- No readable text, labels, pseudo-text, or watermarks.
-- No whole cards, whole panels, whole charts, or full-page fragments.
-- No redrawing, beautifying, simplifying, synonym-symbol replacement, or "cleaner" substitute icons.
-
-Key color: any high-saturation pure color (cyan, green, magenta, red, orange, ...) that does not appear in the assets and is far from all subject, stroke, shadow, and highlight colors — green subjects must not use `#00ff00`, blue/purple subjects must not use cyan/blue families, purple/magenta subjects must not use `#ff00ff`, white subjects must not use white or light gray. If `process-sheet` background removal fades the subject, cuts edges, or leaves key-color remnants, regenerate the sheet with a different key color first; only then consider tuning removal parameters.
-
-### 2.3 Asset Sheet Reconciliation
-
-After a sheet is generated and split, reconcile it against `visual_inventory`:
-
-- Split asset count covers all required objects, and every asset name corresponds to the inventory.
-- Missing objects, wrong symbols, missing strokes, severe deformation, background attachment, text contamination, or synonymous substitution must be regenerated or fixed before use.
-
-What may ship as a recorded warning after compliant separation is defined in "Fix versus Warning" at the end of this file.
-
-## 3. PPT Native Element Reconstruction
-
-Step 3 rebuilds everything carried by native PowerPoint structure, plus formula assets. Enter it only after the step-1/2 decisions are recorded.
-
-### 3.1 Text and Text Boxes
-
-All readable text defaults to native PPT text boxes. Never use generated images to carry editable text, and never use hidden text, transparent text, 1 pt text, or off-canvas text to satisfy the text inventory. (Formulas are not ordinary text — see 3.2.)
-
-Exceptions — text that is part of brand or background identity rather than editable content:
-
-- Logo wordmarks, brand symbols, and trademark text.
-- Brand text on product packaging.
-- Place names on map base imagery.
-- Small text inside UI screenshots that is not required to be editable.
-- Signage in photo backgrounds.
-- Textures such as newspapers, book pages, or code.
-- Tiny text with very low OCR confidence that does not affect main meaning.
-
-Explain each exception in `visual_inventory` or `asset_provenance`. Never disguise main titles, subtitles, body text, table text, legends, axis labels, numbers, tags, or button text as exceptions.
-
-Do not guess font sizes or positions by eye — `image2ppt prepare` already measured them. Every page dir contains `text_hints.json` (each detected line's source-pixel `box_px`, glyph height, and derived font sizes; the `backend` field records which detector produced them) and `text_hints.png`, the source image with every detected line framed and labeled. If missing, regenerate with `image2ppt page hints <page_dir>`. Use the hints like this:
-
-- Match each detected line in the overlay image to the text you read in the source.
-- Copy the measured `box_px` and the matching font size column (`font_pt_if_cjk` for CJK text, `font_pt_if_latin` for Latin) into the corresponding `text_boxes` item.
-- Add `"font_size_source": "measured"` to every box sized this way. Set
-  `"typography_policy": "governed"` in a new manifest so the deterministic
-  builder preserves that authored size and lets QA report overflow. A manifest
-  without the policy retains the legacy fitter for migration compatibility.
-- Hints are advisory and incomplete by design. Fill lines the detector missed and correct lines it merged with a graphic or labeled implausibly (a box sitting on an icon or photo) from your own reading of the source — a missed hint never means the text can be dropped.
-- Same-level text uses exactly one font size: lines sharing a `size_group` get the same size, hand-added text joins the size group of its level, and the final page keeps same-level text identical even where individual measurements disagree slightly.
-- In governed manifests, use the validator's deterministic fit estimate as the
-  overflow guard; repair semantic wrapping or the box before changing a whole
-  same-level group. The legacy `fit_text` fitter remains only for manifests
-  without the governed policy.
-- After building a preview, compare text by level against the source; do not enlarge titles, body text, or labels by default. If any level looks larger, heavier, more crowded, or wraps more than the source, fix the font size or box before continuing.
-
-Record completed calibration with `quality_checks.font_size_calibrated=true`.
-
-### 3.2 Formula Handling
-
-Transcribe each formula from the source into LaTeX, then render it with the local
-CLI into an image asset written inside the page directory (prefer SVG; use PNG
-when SVG preview/PowerPoint compatibility is unstable):
-
-```bash
-python <image2ppt-root>/cli/image2ppt/cli.py formula render-latex <page_dir> \
-  --tex "\\sum_{i \\in N} p_{ij} x_{ij} \\ge a_j u_j" \
-  --out assets/formula_c2_1.svg \
-  --box 105,392,390,90 \
-  --id formula_c2_1 \
-  --fragment assets/formula_c2_1.fragment.json
-```
-
-Merge the fragment's `images`, `asset_provenance`, and `formula_inventory` into `manifest.json`; the required provenance fields are in `manifest-schema.md`. Never assemble formulas from Unicode subscripts/superscripts or many hand-written text boxes, and never use source-image formula snippets.
-
-If the machine lacks a TeX engine or converter, or compilation fails, keep
-`validation.json.passed=false` and record the formula id, LaTeX source, exact CLI
-error, and required repair. Do not replace the formula with a full-page screenshot.
-Delivery may proceed only when the user explicitly approves omission of that exact
-formula; record `user_approved_exception: true` and a concrete `approval_note` in
-its `formula_inventory` entry.
-
-### 3.3 Structural Primitives and Layout Objects
-
-These may use native PPT shapes or structural objects:
-
-- Straight lines, dashed lines, polylines.
-- Rectangles, rounded rectangles, circles, ellipses.
-- Ordinary arrows and connectors.
-- Solid-color cards, panels, dividers, borders.
-- Tables, table lines, axes, gridlines.
-- Simple bar charts, progress bars, status color blocks.
-- Simple callouts.
-- Basic flow boxes and containers without style-specific details.
-
-Native shapes carry only layout structure, never semantic icons or visual identity: a DNA mark, lock, network node, target, magnifier, or checkmark inside a circular icon is not a structural primitive — separate it in step 2.
-
-### 3.4 Corner Geometry
-
-Corner decisions are conservative because over-rounding is a common, visible failure:
-
-- Classify the source corner first: `straight`, `small-radius`, `large-radius`, or `pill`.
-- Use `rect` for `straight`; use `roundRect` for the rest and estimate `source_corner_radius_px`.
-- Corner radius is an object-level property, not a boolean: an 8-12 px slight radius on a large panel must not become a 70 px pill.
-- If uncertain, zoom into the source corner; if still uncertain, record the basis and prefer the smaller radius.
-- Every `roundRect` records `source_corner_radius_px`; `corner_reason` is supplemental and never replaces the radius.
-- Never round ordinary rectangles out of design preference.
-
-### 3.5 Text Strokes and Decoration Splitting
-
-A readable character stroke belongs only to its native text box — never draw the same stroke again as a shape. Independent decorative lines, dividers, and button underlines may be shapes, but only after confirming they are not part of text. If the preview shows an extra dash, dot, or repeated symbol, inspect the source to decide whether it is a text stroke or an independent decoration, then remove the duplicate.
-
-### 3.6 Grouping and Layering
-
-Preserve grouping relationships (icon + circular base, badge + number, speech bubble + text, hand-drawn arrow + annotation, card background + title + chart + labels).
-
-For native text centered inside a badge or circular base, reuse the base shape's exact `box_px` for the text box and use the centered horizontal and vertical alignment defined in `manifest-schema.md` under "Text alignment." A separate tight ink box drifts as font metrics change and is not a stable grouping relationship.
-
-Recommended z-index:
-
-- clean background/base: 0
-- native structural shapes: 10-20
-- separated foreground assets: 30
-- native editable text: 40+
-- circles, stickers, or hand-drawn marks that must sit above text: 50+
-
-The background must not cover text, foreground assets must sit on the right layer, and the same text, icon, or decoration must never appear both in an image layer and as a native object.
-
-## Final Self-Check
-
-Whoever rebuilds the page checks it once against this list — deterministic validation is necessary but not sufficient, and the parent agent does not repeat this check. Record the evidence in structured manifest fields, `validation.json`, and the hash-bound visual-review evidence defined in `qa-contract.md`. Deck-level structural QA follows "Finalize and revalidate the rebuilt deck" in `SKILL.md`.
-
-Structure and artifacts:
-
-- `page.pptx` builds from `manifest.json` and opens; `preview.png` exists; `split_assets_contact.png` exists and shows an origin-versus-preview comparison.
-- Every final raster asset has provenance.
-
-Background:
-
-- The clean base contains no readable text and no foreground object that will be rebuilt later.
-- Repaired regions show no ghosts, blur blocks, smear patches, or pseudo-text.
-- A complex-background clean base is the same background as the source — composition, perspective, object positions, colors, lighting, and key details have not drifted. A related-theme lookalike is a current-page fix even if deterministic validation passes.
-- No image-backend call was wasted on solid or regular backgrounds.
-
-Assets:
-
-- `visual_inventory` covers all non-text visual objects; each has an independent representation unless explicitly recorded as background; no required object is missing or stood in by a low-quality placeholder.
-- Every source decision follows sections 1-3: nothing marked for separation was replaced with a similar-but-different symbol, approximated with native primitives, or substituted with a source-image snippet.
-- Split assets have no fused objects, missing edges, wrong names, fragments, or cross-object shadows; alpha edges have no chroma-key remnants.
-
-Text:
-
-- `text_inventory` covers all readable text; every editable item is a real, visible native text box (no hidden, transparent, 1 pt, or off-canvas text).
-- Font sizes and positions are calibrated per 3.1: no clipping, wrong wrapping, or container overflow, and no level visibly larger, heavier, or more crowded than the source.
-- CJK previews show no boxes or mojibake; use a stable CJK font when needed.
-- No text, icon, or decoration appears both in an image layer and as a native object.
-
-Shapes and layers:
-
-- Corners follow 3.4; large container corners, table borders, and card borders align with the source. Corner misclassification is a current-page fix, not a low-risk warning.
-- No text stroke is redrawn as a decorative shape (3.5).
-- Dashboards, tables, cards, and charts are decomposed per 1.4, never screenshotted wholesale.
-- Badge and circular-number groups follow the shared-box centering rule in 3.6.
-- z-index follows 3.6; no text or key object is covered.
-
-## Fix versus Warning
-
-Every failed self-check item above is a current-page fix, owned by the page author, before the page returns. These structural conditions are also hard failures, never warnings:
-
-- The input cannot be normalized.
-- The page lacks a buildable `manifest.json`/`page.pptx`, or the PPTX cannot be opened.
-- Text font size or position visibly deviates from the source and causes crowding, overflow, or occlusion.
-- A formula cannot be rendered and lacks an explicit user-approved exception for
-  that exact formula.
-
-May ship as recorded warnings with the current PPT — but only after the required object-source workflow has succeeded:
-
-- Minor line-width, antialiasing, proportion, shadow, or detail differences in separated assets.
-- Minor visual drift in non-critical decorations.
-- Recorded low-risk font differences.
-
-Warnings never hide a failure to follow the three-step decision process: an object-source violation is always a current-page fix.
+页面返回前还要确认：`manifest.json` 能独立构建；`page.pptx`、`preview.png`、`split_assets_contact.png` 和 provenance 都存在；普通箭头对象数为一；复合图节点/边锚点完整；有 renderer 时完成源图对照，无 renderer 时明确列出未验收项。`validation.json.passed` 只有在必需结构和实际可用的 QA 门禁都完成后才为 true。

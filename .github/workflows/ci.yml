@@ -29,7 +29,7 @@ jobs:
       - name: Install bundled dependencies and CLI
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements.txt vtracer
           python -m pip install --editable cli
 
       - name: Run unit and isolation tests
@@ -39,7 +39,64 @@ jobs:
         run: python cli/image2ppt/cli.py doctor --json
 
       - name: Check whitespace
+        run: python -c "import subprocess,sys; result=subprocess.run(['git','grep','-nE',r'[[:blank:]]+$','--','*.py','*.md','*.yaml','*.yml','*.txt']); sys.exit(1 if result.returncode == 0 else 0 if result.returncode == 1 else result.returncode)"
+
+  portable-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out Image2PPT
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install bundled dependencies and CLI
+        shell: pwsh
         run: |
-          if git grep -nE '[[:blank:]]+$' -- '*.py' '*.md' '*.yaml' '*.yml' '*.txt'; then
-            exit 1
-          fi
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt vtracer
+          python -m pip install --editable cli
+
+      - name: Run offline portability tests
+        shell: pwsh
+        run: |
+          python -c "import unittest,sys; patterns=['test_platform_tools.py','test_package_skill.py','test_console_portability.py','test_script_inventory.py','test_vector_assets.py','test_provider_portability.py','test_object_routing.py','test_svg_packaging.py','test_local_workflow.py']; suite=unittest.TestSuite(unittest.defaultTestLoader.discover('tests',pattern=p) for p in patterns); sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())"
+
+      - name: Check package and whitespace
+        shell: pwsh
+        run: |
+          python scripts/package_skill.py --output "$env:RUNNER_TEMP\image2ppt.zip"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "import subprocess,sys; result=subprocess.run(['git','grep','-nE',r'[[:blank:]]+$','--','*.py','*.md','*.yaml','*.yml','*.txt']); sys.exit(1 if result.returncode == 0 else 0 if result.returncode == 1 else result.returncode)"
+
+  portable-macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out Image2PPT
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install bundled dependencies and CLI
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt vtracer
+          python -m pip install --editable cli
+
+      - name: Run offline portability tests
+        run: |
+          python -c "import unittest,sys; patterns=['test_platform_tools.py','test_package_skill.py','test_console_portability.py','test_script_inventory.py','test_vector_assets.py','test_provider_portability.py','test_object_routing.py','test_svg_packaging.py','test_local_workflow.py']; suite=unittest.TestSuite(unittest.defaultTestLoader.discover('tests',pattern=p) for p in patterns); sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())"
+
+      - name: Check package and whitespace
+        run: |
+          python scripts/package_skill.py --output "$RUNNER_TEMP/image2ppt.zip"
+          python -c "import subprocess,sys; result=subprocess.run(['git','grep','-nE',r'[[:blank:]]+$','--','*.py','*.md','*.yaml','*.yml','*.txt']); sys.exit(1 if result.returncode == 0 else 0 if result.returncode == 1 else result.returncode)"

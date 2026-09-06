@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import html
+import io
 import json
 import math
 import re
@@ -13,6 +14,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from deck_run_state import resolve_inside
+from platform_tools import discover_image_magick
 
 
 EMU_PER_INCH = 914400
@@ -431,16 +433,22 @@ def text_box_xml(idx, item):
       </p:sp>"""
 
 
-def image_xml(idx, rel_id, item):
+def image_xml(idx, rel_id, item, svg_rel_id=None):
     left = emu(item.get("left", 0))
     top = emu(item.get("top", 0))
     width = emu(item.get("width", 1))
     height = emu(item.get("height", 1))
     name = xml_text(item.get("alt") or Path(item.get("path", "")).stem or f"Image {idx}")
+    extension = (
+        '<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}">'
+        '<asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" '
+        f'r:embed="{svg_rel_id}"/></a:ext></a:extLst>'
+        if svg_rel_id else ""
+    )
     return f"""
       <p:pic>
         <p:nvPicPr><p:cNvPr id="{idx}" name="{name}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
-        <p:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>
+        <p:blipFill><a:blip r:embed="{rel_id}">{extension}</a:blip><a:stretch><a:fillRect/></a:stretch></p:blipFill>
         <p:spPr><a:xfrm><a:off x="{left}" y="{top}"/><a:ext cx="{width}" cy="{height}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>
       </p:pic>"""
 
@@ -567,6 +575,28 @@ def round_rect_adjustment(item):
 
 
 def preset_geometry_xml(preset, item):
+    if preset in {"rightArrow", "leftArrow", "upArrow", "downArrow"} and any(
+        item.get(key) is not None for key in ("source_head_length_px", "source_shaft_thickness_px")
+    ):
+        box = item.get("box_px")
+        if not box or len(box) != 4:
+            raise ValueError("Measured arrow geometry requires box_px")
+        width, height = float(box[2]), float(box[3])
+        if min(width, height) <= 0:
+            raise ValueError("Measured arrow dimensions must be positive")
+        horizontal = preset in {"rightArrow", "leftArrow"}
+        length, thickness = (width, height) if horizontal else (height, width)
+        guides = []
+        for field, name, maximum, divisor in (
+            ("source_shaft_thickness_px", "adj1", thickness, thickness),
+            ("source_head_length_px", "adj2", length, min(width, height)),
+        ):
+            if item.get(field) is not None:
+                value = float(item[field])
+                if not math.isfinite(value) or not 0 < value <= maximum:
+                    raise ValueError(f"{field} must be positive and within the source arrow bounds")
+                guides.append(f'<a:gd name="{name}" fmla="val {round(value / divisor * 100000)}"/>')
+        return f'<a:prstGeom prst="{preset}"><a:avLst>{"".join(guides)}</a:avLst></a:prstGeom>'
     if preset != "roundRect":
         return f'<a:prstGeom prst="{preset}"><a:avLst/></a:prstGeom>'
     adjustment = round_rect_adjustment(item)
@@ -595,7 +625,8 @@ def slide_xml(manifest):
         if kind == "shape":
             parts.append(shape_xml(next_id, item))
         elif kind == "image":
-            parts.append(image_xml(next_id, rel_id, item))
+            svg_rel_id = f"{rel_id}Svg" if image_ext(item["path"]) == ".svg" else None
+            parts.append(image_xml(next_id, rel_id, item, svg_rel_id))
         else:
             parts.append(text_box_xml(next_id, item))
         next_id += 1
@@ -616,8 +647,12 @@ def slide_xml(manifest):
 def rels_xml(manifest, media_start=1, notes_index=None):
     rels = ['<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>']
     for i, item in enumerate(manifest.get("images", []), start=1):
-        target = f"../media/image{media_start + i - 1}{image_ext(item['path'])}"
+        extension = image_ext(item["path"])
+        target = f"../media/image{media_start + i - 1}{'.png' if extension == '.svg' else extension}"
         rels.append(f'<Relationship Id="rId{i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{target}"/>')
+        if extension == ".svg":
+            svg_target = f"../media/image{media_start + i - 1}.svg"
+            rels.append(f'<Relationship Id="rId{i + 1}Svg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{svg_target}"/>')
     if notes_index is not None:
         rels.append(
             f'<Relationship Id="rId{len(rels) + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide{notes_index}.xml"/>'
@@ -680,6 +715,8 @@ def content_types_xml(manifests, notes_indices=None):
         for item in manifest.get("images", []):
             ext = image_ext(item["path"]).lstrip(".")
             defaults[ext] = content_type_for(item["path"])
+            if ext == "svg":
+                defaults["png"] = "image/png"
     default_xml = "".join(f'<Default Extension="{ext}" ContentType="{ctype}"/>' for ext, ctype in defaults.items())
     overrides = [
         '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>',
@@ -788,6 +825,18 @@ def write_common_parts(z, slide_count, width, height, notes_count):
         z.writestr("ppt/notesMasters/_rels/notesMaster1.xml.rels", notes_master_rels_xml())
 
 
+def write_image_media(archive, source, media_index):
+    """Keep SVG fidelity with a real PNG primary image for older renderers."""
+    archive.write(source, f"ppt/media/image{media_index}{image_ext(source)}")
+    if image_ext(source) == ".svg":
+        try:
+            import resvg_py
+        except ImportError as exc:
+            raise RuntimeError("SVG packaging requires resvg_py; install requirements.txt") from exc
+        png = resvg_py.svg_to_bytes(svg_string=source.read_text(encoding="utf-8"), zoom=2)
+        archive.writestr(f"ppt/media/image{media_index}.png", png)
+
+
 def write_pptx(manifest, out_path, manifest_path):
     width = emu(manifest.get("slide", {}).get("width", 13.333))
     height = emu(manifest.get("slide", {}).get("height", 7.5))
@@ -804,7 +853,7 @@ def write_pptx(manifest, out_path, manifest_path):
             z.writestr("ppt/slides/slide1.xml", slide_xml(normalized))
             z.writestr("ppt/slides/_rels/slide1.xml.rels", rels_xml(normalized, media_index, None))
             for src in image_sources:
-                z.write(src, f"ppt/media/image{media_index}{image_ext(src)}")
+                write_image_media(z, src, media_index)
                 media_index += 1
 
 
@@ -843,7 +892,7 @@ def write_deck(deck, page_entries, out_path, notes_entries):
                 z.writestr(f"ppt/slides/slide{slide_index}.xml", slide_xml(manifest))
                 z.writestr(f"ppt/slides/_rels/slide{slide_index}.xml.rels", rels_xml(manifest, media_index, notes_index))
                 for src in slide_sources:
-                    z.write(src, f"ppt/media/image{media_index}{image_ext(src)}")
+                    write_image_media(z, src, media_index)
                     media_index += 1
                 if notes_index is not None:
                     note = notes_by_page[slide_index]
@@ -915,16 +964,47 @@ def render_preview(manifest, manifest_path, out_path):
 
     def open_preview_image(src):
         if src.suffix.lower() != ".svg":
-            return Image.open(src).convert("RGBA")
-        convert = "/opt/homebrew/bin/magick"
-        if not Path(convert).exists():
-            convert = "/opt/homebrew/bin/convert"
-        if not Path(convert).exists():
-            print(f"Warning: cannot preview SVG without ImageMagick: {src}", file=sys.stderr)
-            return None
-        with tempfile.NamedTemporaryFile(suffix=".png") as handle:
-            subprocess.run([convert, str(src), handle.name], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            return Image.open(handle.name).convert("RGBA")
+            with Image.open(src) as raster:
+                return raster.convert("RGBA")
+        resvg_error = None
+        try:
+            import resvg_py
+
+            png_bytes = resvg_py.svg_to_bytes(svg_path=str(src))
+            with Image.open(io.BytesIO(png_bytes)) as rendered:
+                return rendered.convert("RGBA")
+        except ImportError:
+            pass
+        except Exception as exc:
+            # A local ImageMagick install can still render SVG features that
+            # a particular resvg build does not support.  Keep that fallback,
+            # but include the primary failure if both routes are unavailable.
+            resvg_error = exc
+        converter = discover_image_magick()
+        if not converter:
+            detail = f"; resvg_py failed: {resvg_error!r}" if resvg_error else ""
+            raise RuntimeError(
+                "Cannot preview SVG: install ImageMagick and expose `magick` "
+                f"(or `convert` on macOS/Linux) on PATH, or install resvg_py{detail}: {src}"
+            )
+        # Windows keeps an open NamedTemporaryFile locked.  Close the file
+        # before ImageMagick writes it, then load a detached PIL image before
+        # removing the temporary path.
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+                temp_path = Path(handle.name)
+            subprocess.run(
+                [converter, str(src), str(temp_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            with Image.open(temp_path) as rendered:
+                return rendered.convert("RGBA")
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
 
     def render_shape(item):
         box = [item.get("left", 0) * scale, item.get("top", 0) * scale, (item.get("left", 0) + item.get("width", 1)) * scale, (item.get("top", 0) + item.get("height", 1)) * scale]

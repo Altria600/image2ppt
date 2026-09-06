@@ -8,6 +8,20 @@ from PIL import Image, UnidentifiedImageError
 from deck_run_state import now_iso, read_json, resolve_inside, sha256_file, write_json
 
 
+KNOWN_BACKENDS = {
+    "local-only",
+    "host-image-tool",
+    "external-import",
+    "builtin-imagegen",
+    "image2ppt-image-cli",  # legacy page contracts
+    "codex-oauth",
+    "openai-compatible-api",
+    "unknown",
+}
+REMOTE_BACKENDS = {"codex-oauth", "openai-compatible-api"}
+HOST_BACKENDS = {"host-image-tool", "builtin-imagegen"}
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="image2ppt image import",
@@ -26,7 +40,7 @@ def main():
     parser.add_argument("--prompt-file", help="Optional prompt file path used to create the selected image.")
     parser.add_argument(
         "--backend",
-        choices=["builtin-imagegen", "codex-oauth", "openai-compatible-api", "unknown"],
+        choices=sorted(KNOWN_BACKENDS),
         required=True,
         help="Actual image backend that produced the selected image.",
     )
@@ -54,9 +68,12 @@ def main():
     except (UnidentifiedImageError, OSError) as exc:
         raise SystemExit(f"Generated image is unreadable: {source}: {exc}") from exc
 
-    cli_backends = {"codex-oauth", "openai-compatible-api"}
+    cli_backends = REMOTE_BACKENDS
     if args.fallback_reason and args.backend not in cli_backends:
-        raise SystemExit("--fallback-reason requires --backend codex-oauth or openai-compatible-api")
+        raise SystemExit(
+            "--fallback-reason requires --backend codex-oauth or openai-compatible-api; "
+            "it is reserved for a legacy remote fallback producer"
+        )
 
     request = read_json(page_dir / "page_request.json", default={})
     contract = request.get("image_backend") or {}
@@ -64,11 +81,34 @@ def main():
     if preferred_backend == "builtin-imagegen":
         if args.backend == "unknown":
             raise SystemExit("A builtin-imagegen page contract requires a known producing backend")
-        if args.backend in cli_backends and not args.fallback_reason:
-            raise SystemExit("CLI output under a builtin-imagegen contract requires --fallback-reason")
         allowed_reasons = (contract.get("fallback_policy") or {}).get("on") or []
         if args.fallback_reason and args.fallback_reason not in allowed_reasons:
             raise SystemExit(f"Fallback reason is not permitted by page_request.json: {args.fallback_reason}")
+        if args.backend not in HOST_BACKENDS and not args.fallback_reason:
+            raise SystemExit(
+                "A builtin-imagegen compatibility contract accepts a host-image-tool producer; "
+                "switch the manifest to external-import/API before using another producer"
+            )
+    elif preferred_backend == "host-image-tool":
+        if args.backend not in HOST_BACKENDS:
+            raise SystemExit(
+                "A host-image-tool page contract requires --backend host-image-tool "
+                "(or the builtin-imagegen compatibility alias); no fallback is automatic"
+            )
+        if args.fallback_reason:
+            raise SystemExit("host-image-tool does not permit fallback reasons")
+    elif preferred_backend in {"local-only", "external-import"}:
+        allowed = {preferred_backend}
+        if preferred_backend == "local-only":
+            # Local source-extracted assets may still be recorded as explicit
+            # external imports, but this is never a provider fallback.
+            allowed.add("external-import")
+        if args.backend not in allowed:
+            raise SystemExit(
+                f"A {preferred_backend} page contract requires an explicit {preferred_backend} import producer"
+            )
+        if args.fallback_reason:
+            raise SystemExit(f"{preferred_backend} does not permit fallback reasons")
     elif preferred_backend == "image2ppt-image-cli":
         if args.backend not in cli_backends:
             raise SystemExit("An image2ppt-image-cli page contract requires --backend codex-oauth or openai-compatible-api")
@@ -77,6 +117,11 @@ def main():
     elif preferred_backend == "openai-compatible-api":
         if args.backend != "openai-compatible-api":
             raise SystemExit("An openai-compatible-api page contract requires --backend openai-compatible-api")
+        if args.fallback_reason:
+            raise SystemExit("--fallback-reason requires a builtin-imagegen page contract")
+    elif preferred_backend == "codex-oauth":
+        if args.backend != "codex-oauth":
+            raise SystemExit("A codex-oauth page contract requires --backend codex-oauth")
         if args.fallback_reason:
             raise SystemExit("--fallback-reason requires a builtin-imagegen page contract")
     elif preferred_backend:

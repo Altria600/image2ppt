@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-labelledby="title desc">
+  <title id="title">Image2PPT：让每一页，重新可编辑。</title>
+  <desc id="desc">图片和扫描文档中的文字、图形与视觉素材，重建为独立可编辑的 PowerPoint 对象。右侧为工作原理示意。</desc>
+  <rect width="1280" height="620" rx="20" fill="#F5F3EE"/>
+  <path d="M640 40V580" stroke="#DEDCD5"/>
+  <g font-family="Noto Sans CJK SC, Microsoft YaHei, PingFang SC, sans-serif">
+    <rect x="60" y="48" width="32" height="32" rx="7" fill="#1D6653"/>
+    <path d="M69 57H82V64H74V72" fill="none" stroke="#FFF" stroke-width="3"/>
+    <text x="106" y="73" font-size="24" font-weight="700" fill="#182C27">Image2PPT</text>
+    <text x="60" y="134" font-size="15" letter-spacing="3" fill="#65756A">找回原稿，继续创作</text>
+    <text x="56" y="233" font-size="67" font-weight="800" fill="#182C27">让每一页，</text>
+    <text x="56" y="322" font-size="67" font-weight="800" fill="#1D6653">重新可编辑。</text>
+    <text x="60" y="387" font-size="22" fill="#45574D">一张图片，也可以成为下一次修改的起点。</text>
+    <text x="60" y="426" font-size="19" fill="#65756A">文字能改 · 图形能动 · 素材能换</text>
+    <path d="M60 474H577" stroke="#D2D8CF"/>
+    <text x="60" y="518" font-size="17" fill="#182C27">图片 / 扫描 PDF / 图片型 PPT</text>
+    <path d="M431 511H473M465 504L473 511L465 518" fill="none" stroke="#1D6653" stroke-width="2"/>
+    <text x="493" y="518" font-size="19" font-weight="700" fill="#1D6653">PPTX</text>
+    <text x="60" y="565" font-size="14" fill="#65756A">开源 Skill · 本地优先 · 多种模型与工具可接入</text>
+
+    <text x="697" y="65" font-size="14" letter-spacing="1" fill="#65756A">01 / 从一张画面开始</text>
+    <rect x="697" y="88" width="521" height="200" rx="10" fill="#FFF" stroke="#CDD6CD"/>
+    <text x="724" y="130" font-size="22" font-weight="700" fill="#263C33">项目进展</text>
+    <text x="724" y="158" font-size="13" fill="#7A887F">从看见内容，到重新拥有内容</text>
+    <rect x="725" y="187" width="132" height="72" rx="4" fill="#E8EFE7"/>
+    <rect x="875" y="187" width="132" height="72" rx="4" fill="#E8EFE7"/>
+    <rect x="1025" y="187" width="165" height="72" rx="4" fill="#F7EEE3"/>
+    <path d="M744 240H760V218H776V227H793V205H815V240" fill="none" stroke="#1D6653" stroke-width="5"/>
+    <path d="M898 228H974M961 217L974 228L961 239" fill="none" stroke="#1D6653" stroke-width="4"/>
+    <circle cx="1065" cy="223" r="18" fill="#D5744F"/>
+    <path d="M1097 216H1170M1097 232H1152" stroke="#B6A997" stroke-width="5"/>
+    <path d="M956 302V326M948 318L956 326L964 318" fill="none" stroke="#1D6653" stroke-width="2"/>
+    <text x="697" y="355" font-size="14" letter-spacing="1" fill="#65756A">02 / 还原为独立对象</text>
+    <rect x="697" y="378" width="521" height="173" rx="10" fill="#FFF" stroke="#CDD6CD"/>
+    <rect x="718" y="400" width="218" height="47" fill="#F0F7F2" stroke="#1D6653" stroke-width="1.5"/>
+    <text x="735" y="432" font-size="24" font-weight="700" fill="#263C33">项目进展</text>
+    <g fill="#FFF" stroke="#1D6653" stroke-width="1.5">
+      <rect x="714" y="396" width="8" height="8"/><rect x="932" y="396" width="8" height="8"/>
+      <rect x="714" y="443" width="8" height="8"/><rect x="932" y="443" width="8" height="8"/>
+    </g>
+    <text x="967" y="430" font-size="16" fill="#1D6653">文字 · 自由修改</text>
+    <path d="M730 483H899M886 473L899 483L886 493" fill="none" stroke="#1D6653" stroke-width="5"/>
+    <circle cx="730" cy="483" r="5" fill="#FFF" stroke="#1D6653" stroke-width="2"/>
+    <text x="967" y="488" font-size="16" fill="#1D6653">图形 · 独立调整</text>
+    <path d="M719 523H941" stroke="#D8DFD7" stroke-dasharray="4 5"/>
+    <text x="967" y="529" font-size="16" fill="#946348">素材 · 保留与替换</text>
+    <text x="697" y="582" font-size="12" fill="#7C887F">工作原理示意 · 实际转换案例与可编辑范围见下文</text>
+  </g>
+</svg>

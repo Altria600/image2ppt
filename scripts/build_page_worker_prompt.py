@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+import sys
 from pathlib import Path
 
 from runtime_paths import CLI_ENTRY, SKILL_ROOT, resolve_inside
@@ -13,6 +14,14 @@ from runtime_paths import CLI_ENTRY, SKILL_ROOT, resolve_inside
 
 BASE_TEMPLATE = SKILL_ROOT / "prompts" / "page-worker-base.md"
 PROFILE_ADDENDUM = SKILL_ROOT / "prompts" / "page-worker.md"
+
+
+def shell_command(argv: list[str], *, windows: bool | None = None) -> str:
+    """Render display commands for POSIX shells or Windows PowerShell."""
+    is_windows = sys.platform == "win32" if windows is None else windows
+    if is_windows:
+        return "& " + " ".join("'" + str(item).replace("'", "''") + "'" for item in argv)
+    return shlex.join([str(item) for item in argv])
 
 
 def read_json(path: Path) -> dict:
@@ -59,7 +68,8 @@ def render_prompt(run_dir: Path, page: dict, page_dir: Path) -> str:
     addendum = PROFILE_ADDENDUM.read_text(encoding="utf-8").strip()
     template = base + "\n\n" + addendum
     request = read_json(page_dir / "page_request.json")
-    cli = shlex.join([__import__("sys").executable, str(CLI_ENTRY)])
+    prefix = [sys.executable, str(CLI_ENTRY)]
+    cli = shell_command(prefix)
     replacements = {
         "{{RUN_DIR}}": str(run_dir),
         "{{PAGE_ID}}": str(page.get("page_id")),
@@ -67,6 +77,10 @@ def render_prompt(run_dir: Path, page: dict, page_dir: Path) -> str:
         "{{SOURCE_IMAGE}}": str(request.get("source_image") or page_dir / "source.png"),
         "{{SKILL_ROOT}}": str(SKILL_ROOT),
         "{{CLI}}": cli,
+        "{{PAGE_BUILD_COMMAND}}": shell_command([*prefix, "page", "build", str(page_dir)]),
+        "{{PAGE_VALIDATE_COMMAND}}": shell_command([*prefix, "page", "validate", str(page_dir)]),
+        "{{PAGE_QA_COMMAND}}": shell_command([sys.executable, str(SKILL_ROOT / "scripts/run_image2ppt_qa.py"), str(page_dir)]),
+        "{{PAGE_CONTACT_COMMAND}}": shell_command([*prefix, "page", "contact-sheet", str(page_dir)]),
     }
     for key, value in replacements.items():
         template = template.replace(key, value)
@@ -91,7 +105,8 @@ def main() -> int:
         raise SystemExit(f"worker prompt must live inside the page directory: {args.out}") from exc
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_prompt(run_dir, page, page_dir), encoding="utf-8")
-    cli = shlex.join([__import__("sys").executable, str(CLI_ENTRY)])
+    dispatch_argv = [sys.executable, str(CLI_ENTRY), "run", "dispatch", str(run_dir),
+                     "--page", str(page.get("page_id")), "--agent-id", "<worker-id>", "--prompt-file", str(out)]
     payload = {
         "prompt_file": str(out),
         "prompt_template": str(BASE_TEMPLATE),
@@ -100,10 +115,8 @@ def main() -> int:
         "page_dir": str(page_dir),
         "run_dir": str(run_dir),
         "state_owner": "page_jobs.json",
-        "dispatch_command_template": (
-            f"{cli} run dispatch {shlex.quote(str(run_dir))} --page {shlex.quote(str(page.get('page_id')))} "
-            f"--agent-id <worker-id> --prompt-file {shlex.quote(str(out))}"
-        ),
+        "dispatch_command_template": shell_command(dispatch_argv),
+        "dispatch_argv_template": dispatch_argv,
     }
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0

@@ -9,6 +9,7 @@ import json
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -16,6 +17,11 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageStat
 
+RUNTIME_DIR = Path(__file__).resolve().parents[1] / "cli" / "image2ppt" / "runtime"
+if str(RUNTIME_DIR) not in sys.path:
+    sys.path.insert(0, str(RUNTIME_DIR))
+
+from platform_tools import discover_libreoffice, libreoffice_environment  # noqa: E402
 from runtime_paths import resolve_inside
 
 
@@ -73,7 +79,11 @@ def powershell_quote(value: Path) -> str:
 def render_powerpoint(pptx: Path, out_dir: Path, timeout: int) -> tuple[list[Path], dict[str, Any]]:
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")
     if not powershell:
-        return [], {"status": "renderer-unavailable", "error": "PowerShell was not found for PowerPoint COM"}
+        return [], {
+            "status": "renderer-unavailable",
+            "renderer": "powerpoint-com",
+            "error": "PowerShell was not found for PowerPoint COM",
+        }
     out_dir.mkdir(parents=True, exist_ok=True)
     # PowerPoint localizes exported slide filenames (for example, 幻灯片1.PNG).
     # Remove only prior generated PNG renders so a stale rendered.png cannot be
@@ -114,9 +124,13 @@ def render_powerpoint(pptx: Path, out_dir: Path, timeout: int) -> tuple[list[Pat
 
 
 def render_libreoffice(pptx: Path, out_dir: Path, dpi: int, timeout: int) -> tuple[list[Path], dict[str, Any]]:
-    soffice = shutil.which("libreoffice") or shutil.which("soffice")
+    soffice = discover_libreoffice()
     if not soffice:
-        return [], {"status": "renderer-unavailable", "error": "LibreOffice/soffice not found"}
+        return [], {
+            "status": "renderer-unavailable",
+            "renderer": "libreoffice",
+            "error": "LibreOffice/soffice not found on PATH or supported install paths",
+        }
     out_dir.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="image2ppt-libreoffice-") as temp_name:
@@ -140,6 +154,7 @@ def render_libreoffice(pptx: Path, out_dir: Path, dpi: int, timeout: int) -> tup
                 capture_output=True,
                 timeout=timeout,
                 check=False,
+                env=libreoffice_environment(temp_dir),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return [], {
@@ -246,6 +261,15 @@ def main() -> int:
         rendered, raw = render_existing(existing, out_dir)
     elif platform.system().lower() == "windows":
         rendered, raw = render_powerpoint(pptx, out_dir, args.timeout)
+        if raw.get("status") != "rendered":
+            # PowerPoint COM is the preferred Windows renderer, but it is not
+            # present on every Windows host (for example, CI or a minimal
+            # workstation).  Keep its original failure in the report while
+            # trying the same local LibreOffice fallback used elsewhere.
+            primary = raw
+            rendered, fallback = render_libreoffice(pptx, out_dir, args.dpi, args.timeout)
+            fallback["primary_renderer"] = primary
+            raw = fallback
     else:
         rendered, raw = render_libreoffice(pptx, out_dir, args.dpi, args.timeout)
     stable = None

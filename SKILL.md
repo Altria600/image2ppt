@@ -1,222 +1,163 @@
 ---
 name: image2ppt
-description: Convert slide images, screenshots, scanned PDFs, and image-only PPT/PPTX files into high-fidelity object-level editable PowerPoint with measured structure, governed typography, source-faithful assets, and rendered QA. Use for 图片转可编辑PPT、截图还原PPT、扫描PDF恢复、图片型PPTX转换、流程图/知识图谱/复合图形/箭头重建; not for authoring a new deck from notes.
+description: Reconstruct existing slide images, scanned PDFs, and image-only PPT/PPTX files as high-fidelity editable PowerPoint pages with measured typography, mixed object routing, provenance, and rendered QA. Use for 图片转可编辑PPT、截图还原、扫描 PDF 恢复和图片型 PPT/PPTX 转换；不用于根据提纲创作新演示文稿。
 ---
 
 # Image2PPT
 
-Use this directory as the complete runtime. Run deterministic actions only through:
+这是一个本地优先的重建运行时。目标是把已有视觉页面拆成可复核的文本、原生结构、SVG 图片和有来源的局部栅格资产，再从唯一的页面 manifest 重新构建 PPTX。不要把整页截图放进 PPTX 来伪装可编辑，也不要把重建工作改成新幻灯片创作。
+
+所有确定性操作都通过本目录内的 CLI 完成：
 
 ```bash
 python <image2ppt-root>/cli/image2ppt/cli.py <command> ...
 ```
 
-Use Python 3.10 or later with `requirements.txt` installed. When a dedicated
-environment exists, substitute `<image2ppt-root>/.venv/bin/python` on macOS/Linux
-or `<image2ppt-root>/.venv/Scripts/python.exe` on Windows for every `python`
-command below. Do not continue after a failed `doctor`; install only the reported
-missing dependency, then rerun it.
+建议使用 Python 3.10+ 虚拟环境。Mac/Linux 使用 `.venv/bin/python`，Windows 使用 `.venv\\Scripts\\python.exe`；不要假设全局安装了 `image2ppt` 命令。
 
-Do not discover or invoke another Skill, CLI, Prompt, Schema, module, or state machine.
+## 先读哪些合同
 
-## Read the local contracts progressively
+每次任务先读 [references/workflow.md](references/workflow.md)。准备输入或诊断依赖时读 [references/runtime-dependencies.md](references/runtime-dependencies.md)；只有明确允许远程 OCR 时读 [references/ocr-text-hints-contract.md](references/ocr-text-hints-contract.md)。
 
-Always read `references/workflow.md`. Read `references/runtime-dependencies.md`
-only for setup or `doctor` failures, and read
-`references/ocr-text-hints-contract.md` only when choosing or troubleshooting OCR.
+写页面 manifest 前读 [references/page-decision-tree.md](references/page-decision-tree.md) 和 [references/manifest-schema.md](references/manifest-schema.md)。结构化页面再读 [references/region-decomposition.md](references/region-decomposition.md) 与 [references/object-routing.md](references/object-routing.md)；箭头读 [references/manifest-arrow-extension.md](references/manifest-arrow-extension.md)；资产、PDF 和复杂局部读 [references/assets-provenance-contract.md](references/assets-provenance-contract.md) 与 [references/source-fidelity-style-contract.md](references/source-fidelity-style-contract.md)；重复或密集文字读 [references/typography-alignment-contract.md](references/typography-alignment-contract.md)。
 
-Before writing a page manifest, read `references/page-decision-tree.md` and
-`references/manifest-schema.md`. Add only the references needed by that page:
+交付前必须读 [references/qa-contract.md](references/qa-contract.md)。CLI 参数以 [references/cli-helper.md](references/cli-helper.md) 和当前 `--help` 为准；文档不会替代运行时的参数校验。
 
-- structured or compound page: `references/region-decomposition.md` and
-  `references/object-routing.md`;
-- arrows: `references/manifest-arrow-extension.md`;
-- PDF structure, raster assets, or image-backend work: `references/assets-provenance-contract.md` and
-  `references/source-fidelity-style-contract.md`;
-- repeated or dense typography: `references/typography-alignment-contract.md`.
+## 不可改变的产品边界
 
-Before accepting or delivering output, read `references/qa-contract.md`.
+- 输入是已有图片、扫描 PDF 或图片型 PPT/PPTX；不根据笔记、提纲或主题从零写 deck。
+- 每页只有一个 `manifest.json` 作为构建源；`page_jobs.json` 是唯一生命周期状态源；`deck_manifest.json` 只负责运行级输入、页序、备注和最终装配。
+- 原生文本、卡片、表格、普通连接线和普通箭头应保持独立 PowerPoint 对象。复杂视觉只保留实际局部，不能覆盖整页、整张卡片、整张表或整张图表。
+- SVG 是可移动、可替换的 SVG 图片，不自动等于 PowerPoint 原生路径；manifest 必须分别记录 `source_type` 和 `editability`，交付时如实报告。
+- 不因模型名称、国家或语言推断能力。按实际可用的本地工具、主机图像工具、协议能力和用户授权选择路径。
+- 默认离线本地处理。远程 OCR、图像生成或编辑都必须由用户显式选择并提供相应授权；不可读取未被选择的凭据、静默上传、收费或自动切换 provider。
 
-## Preserve the single source of truth
+## 对象路由摘要
 
-- Treat `page_jobs.json` as the only page-state source.
-- Treat each `pages/page_NNN/manifest.json` as the only page-content source.
-- Treat `deck_manifest.json` as the final-assembly source.
-- Use only `prepare`, `run next/dispatch/record/reset/hints/finalize`, and the
-  page commands in the local CLI for stateful lifecycle operations.
-- Keep semantic-region evidence in `manifest.json.image2ppt_region_decomposition`.
-- Never create a second job file, reconstruction plan, OCR normalizer, page
-  controller, packager, or finalize path.
-- Let supplemental QA report failures; never let it mutate lifecycle state.
+先按页面区域理解对象，再按对象选择来源：
 
-## Keep every write inside its owner directory
+| 源对象 | 首选来源 | manifest 记录 |
+| --- | --- | --- |
+| 可读文字、标题、标签、数字 | PowerPoint 原生文本 | `source_type: native-object`，`editability: native-object` |
+| 卡片、表格、普通边框、圆形、普通连接线/箭头 | PowerPoint 原生形状/连接线 | `source_type: native-object`，`editability: native-object` |
+| 可稳定识别的扁平图标或简单标记 | 保持轮廓、比例、颜色和负空间的 SVG | `source_type: svg-reconstructed`，`editability: svg-image` |
+| 源文件有可追踪路径、且本地 VTracer 可复现 | VTracer 生成的 SVG，再做安全检查 | `source_type: vector-traced`，`editability: svg-image` |
+| 照片、纹理、复杂插画、复杂图表局部 | 从原稿提取的有边界局部资产 | `source_type: source-extracted`，`editability: raster-image` 或 `svg-image` |
+| 原稿遮挡修复或本地提取不足的局部 | 用户显式选择的图像编辑/生成工具 | `source_type: image-edited`，`editability: raster-image`，并记录 `transform: image-edit` |
+| 历史或兼容输出 | 既有 imagegen/user-provided 资产 | 按实际格式保留兼容 source type，并补充 `editability` |
 
-- Page build, validation, hints, and QA may read and write only inside that page
-  directory. Manifest paths, recorded assets, formulas, reports, previews, and
-  `--out` overrides must not use `..`, symlinks, or absolute paths to escape it.
-  The sole external-input exception is an explicit image-tool result supplied to
-  `image import` or as `process-sheet --asset-sheet-source`; it is copied into the
-  page before becoming a build dependency.
-- Run-level manifests and final outputs must remain inside the prepared run
-  directory. Finalization rebuilds into a same-directory temporary file and
-  publishes it atomically only after a successful build.
-- Treat any boundary rejection as a hard failure; do not copy the rejected file
-  back into scope and present it as runtime output.
+新 `svg-reconstructed`、`vector-traced`、`source-extracted` 资产必须记录真实 `source_box_px`；SVG 重建和源稿提取还要写 `identity_evidence`，源稿提取必须写 `contamination_check.passed: true` 与具体 observation。VTracer 的 source 应是页面内栅格输入，不是已经生成的 SVG。
 
-## Preserve pre-migration behavior
+扁平图标的 SVG 重建不是“重画一个相似图标”：必须能说明轮廓和视觉身份来自源稿。复杂视觉优先保留原稿身份；只有原稿局部无法干净分离或需要背景修复时才用图像编辑。任何路径都不能造成身份漂移。
 
-- Treat self-containment as a path/import/entrypoint migration, not a redesign of
-  reconstruction behavior.
-- Generate each worker Prompt from the complete local base layer plus the preserved
-  Image2PPT profile layer. Do not condense, reinterpret, or replace either layer.
-- Prefer the previously validated visual strategy when several routes satisfy the
-  contracts. Keep simple measured objects native and retain bounded complex assets
-  wherever a native redraw would reduce fidelity.
-- Never re-author an accepted baseline page merely to prove runtime independence.
-
-## Run the workflow
-
-### Image backend selection
-
-Use `builtin-imagegen` when the agent runtime exposes `image_gen.imagegen`; it is
-the preferred backend because the worker can inspect edit inputs and import the
-explicit local result. Use the CLI image contract only when the built-in tool is
-unavailable, errors, cannot read an input, or returns no valid local output. A
-missing optional argument such as model, mask, size, quality, or output path never
-authorizes fallback. Record the actual producer and permitted fallback reason in
-`imagegen-jobs.json`.
-
-The CLI image contract is provider-neutral at the transport boundary. Select
-`codex-oauth` only for GPT Image model ids. Select `openai-compatible-api` for any
-provider-specific model whose endpoint implements the OpenAI Images-compatible
-`/images/generations` and/or `/images/edits` schema. Do not infer the image backend
-from the task's language model. Use an explicit backend when provenance matters;
-`auto` uses Codex OAuth only for compatible GPT Image ids and otherwise selects the
-configured API without sending Codex OAuth credentials to third parties.
-
-### 1. Preflight and OCR choice
+可选的本地 VTracer：
 
 ```bash
-python <image2ppt-root>/cli/image2ppt/cli.py doctor --json
+python -m pip install vtracer
 ```
 
-Use Baidu AI Studio `PADDLE_OCR_TOKEN` when configured. If it is absent, tell the
-user once that the local `builtin-ink` fallback measures text geometry but does
-not recognize characters; offer the configuration path in
-`references/ocr-text-hints-contract.md`. Respect an offline-only choice.
+未安装时仍可走原生对象、SVG 重建或原图局部资产；不能把缺少 VTracer 自动变成远程调用或近似占位。VTracer 输入必须是页面目录内只含目标局部的栅格文件，`--box` 只记录源像素边界，不会从整页输入中截取局部。
 
-### 2. Prepare one run
+## 图像 backend 合同
+
+backend 是显式运行级合同，写入 `deck_manifest.json.image_backend` 和每页 `page_request.json`。新运行默认 `local-only`：不调用网络图像服务，不读取 Codex OAuth 或其他应用凭据。
+
+| backend | 用途与边界 |
+| --- | --- |
+| `local-only` | 默认。使用本地解析、提取、SVG、VTracer（若安装）和确定性构建；缺工具时报告 blocked。 |
+| `host-image-tool` | 用户明确提供主机图像工具名和调用名；必须显式设置 `--tool-name` 与 `--tool-call`，不得猜测工具。 |
+| `builtin-imagegen` | 兼容宿主提供的 `image_gen.imagegen`；只在运行合同显式选择时使用，编辑前先检查输入，结果必须通过 `image import` 记录。 |
+| `external-import` | 用户已在本地准备好资产；只导入明确路径，不在本地运行时联网或猜测最新文件。 |
+| `openai-compatible-api` | 用户显式授权并提供 OpenAI Images-compatible endpoint、key 和 model；按协议能力判断，不按 provider 名称判断。 |
+| `codex-oauth` | 仅用户显式选择时使用；不得自动读取或推断 OAuth 文件，也不能从其他 backend 静默回退。 |
+
+选择某 backend 后不可无声切换。工具不可用、返回无有效本地输出、输入不可读或协议失败时，保留已完成页并把当前页标为 blocked/failed，说明准确原因和下一步；只有用户重新选择 backend 后才能重试。`builtin-imagegen` 的兼容路径也不改变这一点。
+
+主机工具的通用配置示例：
+
+```bash
+python <image2ppt-root>/cli/image2ppt/cli.py run backend <run> \
+  --mode host-image-tool \
+  --tool-name '<host tool name>' \
+  --tool-call '<host tool call>'
+```
+
+`openai-compatible-api` 需要显式配置 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 和精确的 `IMAGE2PPT_IMAGE_MODEL`；`codex-oauth` 不会因为 model id 看起来像 GPT Image 就被 `auto` 选中。不要把 key、token 或 OAuth 文件写进仓库、Prompt、manifest、日志或 ZIP。
+
+## OCR 与文本提示
+
+默认只使用本地 `builtin-ink` 测量文字几何，不上传、不读取 Paddle token。只有用户明确允许远程 OCR 时，才在当前 `prepare` 或 `run hints` 调用加 `--allow-remote-ocr`，并使用本地配置中的 token；这个授权不写入 page request，也不成为持久状态。网络失败不触发隐式上传或 provider 切换，保留本地测量并报告限制。文字字符仍须由 agent 对照源图核对，OCR 只是提示。
+
+## 页面生命周期
+
+### 1. 准备一次运行
 
 ```bash
 python <image2ppt-root>/cli/image2ppt/cli.py prepare <input...> \
-  --out-root output/image2ppt --image-backend builtin-imagegen
+  --out-root output/image2ppt --image-backend local-only
 ```
 
-To pin a configured third-party provider/model for auditable provenance, prepare
-with `--image-backend openai-compatible-api`. The run contract records the exact
-`IMAGE2PPT_IMAGE_MODEL` from the active project config or environment; it does not
-substitute a GPT Image default merely because no `--model` flag was passed.
+`prepare` 生成唯一运行目录、页源图、`page_request.json`、`page_jobs.json`、备注清单和本地文本提示。多页任务可以选择并发 worker；没有 delegation 能力时，主 agent 也可以逐页串行执行，每次只持有一页：`run dispatch --local` → 构建/QA → `run record`，再处理下一页。不得同时为同一 main agent 持有多个 local lease。
 
-Use `--no-text-hints` only when OCR processing is intentionally disabled. Regenerate
-hints without creating a new run when needed:
+### 2. 领取并重建页面
 
 ```bash
-python <image2ppt-root>/cli/image2ppt/cli.py run hints <run-dir>
-```
-
-### 3. Advance and claim pages
-
-```bash
-python <image2ppt-root>/cli/image2ppt/cli.py run next <run-dir> --json
 python <image2ppt-root>/scripts/build_page_worker_prompt.py \
-  <run-dir> --page <page-id> --out <absolute-page-dir>/worker-prompt.md
+  <run-dir> --page <page-id> \
+  --out <absolute-page-dir>/worker-prompt.md
 python <image2ppt-root>/cli/image2ppt/cli.py run dispatch \
-  <run-dir> --page <page-id> --agent-id <id> --prompt-file <absolute-prompt>
+  <run-dir> --page <page-id> --agent-id <id> \
+  --prompt-file <absolute-prompt> [--local]
 ```
 
-For exactly one page, claim it with `--local` and reconstruct it in the current
-agent. For multiple pages, dispatch independent page workers up to the capacity in
-`page_jobs.json`. Do not reset a live worker merely because it is slow.
+页面 worker 只能写自己的页面目录；不得改运行级 manifest、其他页、原始输入、最终输出或 notes。并发是可选的，不能因为有并发槽位就牺牲页面所有权。
 
-### 4. Reconstruct and gate each page
+### 3. 先决策，再写 manifest
 
-Before drawing, inventory text roles, shared styles, alignment rails, and one
-visual style anchor for the page. Set `typography_policy: governed` in new
-manifests, then record repeated text with `text_style_id` and
-`alignment_group`/`role` when those rails are present. The governed builder
-never changes authored typography to hide overflow; manifests without the new
-policy retain legacy fitting for migration compatibility. Follow
-`references/typography-alignment-contract.md` for fitting and render checks,
-and `references/source-fidelity-style-contract.md` for PDF structure,
-visible-source composition, and asset/style decisions.
+先完成页面清单和 3–8 个语义区域（真正简单的页可用 1–2 个），再记录背景、前景、原生结构和公式来源。所有坐标都是 `source.png` 像素；每个定位对象必须有 `box_px` 或 `points_px`。新 manifest 使用 `schema_version: 2`、`typography_policy: governed`、结构化 `visual_inventory`、`quality_evidence`、`source_type` 和 `editability`。
 
-Plan a structured page as 3–8 semantic regions and route each region independently.
-Use measured compound diagrams: measure every node, relation, and protected anchor. Keep measurable
-circles, cards, straight/dashed relations, and simple connectors native. Use bounded
-transparent assets only for complex local subparts.
+保持以下原则：
 
-Represent a thin arrow as one connector with its arrowhead on the same object.
-Represent a filled arrow as one Arrow AutoShape, with centered label text inside the
-same object. Never construct an ordinary arrow from a line plus triangle and never
-flatten a whole knowledge graph into one image.
+- 文字默认原生；公式由 `formula render-latex` 生成有 provenance 的 SVG/PNG，渲染失败是硬失败，除非用户明确批准该公式例外。
+- 普通箭头是一个连接线或一个 AutoShape，箭头头部属于同一对象；不要用多个对象拼接普通箭头。
+- 每个复杂局部都绑定到真实边界；不把整页、整卡片、整表或整图表作为绕过编辑性的图片。
+- 记录原始输入/提取/追踪/编辑的实际来源、producer、model、提示和限制；不能只写“已处理”。
 
-Write new page manifests with `schema_version: 2`. Use structured
-`visual_inventory` items with explicit `kind` and `representation` values, and
-write a concrete `quality_evidence` observation for every required quality check.
-Formula rendering is a hard gate: a missing engine, converter, or failed compile
-must keep the page failed unless the user explicitly approves that exact formula
-exception and the manifest records both `user_approved_exception: true` and a
-concrete `approval_note`.
-
-The worker Prompt performs the deterministic sequence. Its final gates are:
+### 4. 构建与验收页面
 
 ```bash
 python <image2ppt-root>/cli/image2ppt/cli.py page build <page-dir>
+python <image2ppt-root>/cli/image2ppt/cli.py page validate <page-dir>
 python <image2ppt-root>/scripts/run_image2ppt_qa.py <page-dir>
-# The first run writes visual-review-evidence.template.json and remains pending.
-# Inspect source.png against render/rendered.png, copy and complete the template
-# as visual-review-evidence.json, repair if needed, then:
-python <image2ppt-root>/scripts/run_image2ppt_qa.py <page-dir> \
-  --visual-review-status reviewed \
-  --visual-review-evidence <page-dir>/visual-review-evidence.json
 python <image2ppt-root>/cli/image2ppt/cli.py page contact-sheet <page-dir>
 ```
 
-The evidence file must cover the current source/render hashes and every required
-check with a specific observation. `--visual-review-notes` is optional context and
-cannot substitute for the evidence file.
+`page build` 和结构验证可以在没有 Office 渲染器时运行，但不能把它们称为渲染 QA 通过。只有实际的 LibreOffice、PowerPoint 或明确可用的渲染器产出并完成源图对照，页面才可标记 `visual_review_status: reviewed`；缺少渲染器必须写明“未验收”。Windows PowerPoint、WPS 和不同字体环境的差异需要在目标环境人工复核，本 Skill 不声称已验证它们的等价渲染。
 
-Record only after standard validation and the Image2PPT region, arrow, and rendered
-gates pass:
+视觉证据必须绑定当前源图和 render 的 hash，并逐项说明文字、层级、对象完整性、箭头、资产、字体回退和溢出。泛泛的“看起来没问题”不能关闭 QA。
+
+### 5. 记录、装配与修复
 
 ```bash
 python <image2ppt-root>/cli/image2ppt/cli.py run record \
   <run-dir> --page <page-id> --agent-id <id>
-```
-
-Use the same `run reset` → dispatch → record lifecycle to repair rejected pages.
-
-### 5. Finalize and revalidate the rebuilt deck
-
-When `run next` reports `finalize`, run:
-
-```bash
 python <image2ppt-root>/cli/image2ppt/cli.py run finalize <run-dir>
 python <image2ppt-root>/scripts/run_final_image2ppt_qa.py <run-dir>
-# The first run writes final/visual-review-evidence.template.json and remains pending.
-# Inspect every rendered slide, complete final/visual-review-evidence.json, then:
-python <image2ppt-root>/scripts/run_final_image2ppt_qa.py <run-dir> \
-  --visual-review-status reviewed \
-  --visual-review-evidence <run-dir>/final/visual-review-evidence.json
 ```
 
-Finalize rebuilds from page manifests, preserves source speaker notes, validates the
-package, and writes the output recorded by `deck_manifest.json`. Final QA reapplies
-manifest arrows, verifies arrow atomicity and compound structure, renders every
-slide, checks speaker-note integrity, and writes `final/image2ppt_qa.json`.
+`run record` 只接受页级 `validation.json.passed: true` 且全部必需产物存在的页面；缺少渲染器的页面不能伪造为通过。失败页通过 `run reset` 后按相同生命周期重做，已完成页不会被覆盖。`finalize` 只从已记录页面的 manifest 重建最终 deck，并恢复源 speaker notes；最终 QA 仍需实际 render 与结构检查。
 
-## Deliver
+## 交付与安装
 
-Return the final PPTX path, standard final validation, and
-`final/image2ppt_qa.json`. Report which complex visuals remain replaceable bitmap
-assets. Do not call the deck complete while any page/final gate is pending or failed.
+仓库使用 Codex repo skill 方式时，把本目录放进当前项目的 `.agents/skills/image2ppt/`，再用本地 Python 运行 CLI。不要依赖全局 Skill 安装。
+
+跨宿主分发时，用仓库脚本生成 ZIP：
+
+```bash
+python <image2ppt-root>/scripts/package_skill.py --help
+python <image2ppt-root>/scripts/package_skill.py --output dist/image2ppt.zip
+```
+
+实际参数以该脚本的 `--help` 为准；ZIP 应包含本 Skill 及运行时，不应包含 `config.yaml`、凭据、运行目录或缓存。WorkBuddy 使用“本地 ZIP 导入”即可；不要在文档中编造 WorkBuddy 的自动发现目录或自动安装机制。当前文档不宣称 Windows、WorkBuddy、PowerPoint 或 WPS 已完成验证。
+
+交付时返回最终 PPTX、页/最终 `validation.json` 和 QA 报告，并列出仍为 `svg-image` 或 `raster-image` 的复杂资产。任何 blocked 页、未渲染页、未核对页或未记录 provenance 的对象都必须明确报告。

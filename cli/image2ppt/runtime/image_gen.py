@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Unified CLI for image2ppt image generation or editing.
+"""Explicit image transport CLI for image2ppt.
 
-The CLI prefers local Codex OAuth auth when ~/.codex/auth.json is available.
-If Codex auth is missing, it falls back to OpenAI-compatible API credentials
-from the environment or the active Image2PPT config.yaml.
+The default is local-only.  Remote transports are never selected from ambient
+credentials: callers must choose ``openai-compatible-api`` or legacy
+``codex-oauth`` and pass ``--allow-remote`` for an actual request.  Host-native
+image tools are declarative Agent capabilities and cannot be invoked by this
+subprocess.
 """
 
 from __future__ import annotations
@@ -37,9 +39,25 @@ DEFAULT_CODEX_RETRY_BASE_DELAY_SECONDS = 0.2
 GPT_IMAGE_MODEL_PREFIX = "gpt-image-"
 
 BACKEND_AUTO = "auto"
+BACKEND_LOCAL_ONLY = "local-only"
+BACKEND_HOST_IMAGE_TOOL = "host-image-tool"
+BACKEND_EXTERNAL_IMPORT = "external-import"
+BACKEND_BUILTIN_IMAGEGEN = "builtin-imagegen"
 BACKEND_CODEX_OAUTH = "codex-oauth"
 BACKEND_OPENAI_COMPATIBLE = "openai-compatible-api"
-ALLOWED_BACKENDS = {BACKEND_AUTO, BACKEND_CODEX_OAUTH, BACKEND_OPENAI_COMPATIBLE}
+BACKEND_IMAGE_CLI_LEGACY = "image2ppt-image-cli"
+ALLOWED_BACKENDS = {
+    BACKEND_AUTO,
+    BACKEND_LOCAL_ONLY,
+    BACKEND_HOST_IMAGE_TOOL,
+    BACKEND_EXTERNAL_IMPORT,
+    BACKEND_BUILTIN_IMAGEGEN,
+    BACKEND_IMAGE_CLI_LEGACY,
+    BACKEND_CODEX_OAUTH,
+    BACKEND_OPENAI_COMPATIBLE,
+}
+REMOTE_BACKENDS = {BACKEND_CODEX_OAUTH, BACKEND_OPENAI_COMPATIBLE}
+AGENT_ONLY_BACKENDS = {BACKEND_HOST_IMAGE_TOOL, BACKEND_BUILTIN_IMAGEGEN}
 
 GPT_IMAGE_2_MODEL = "gpt-image-2"
 GPT_IMAGE_2_MIN_PIXELS = 655_360
@@ -66,14 +84,17 @@ CHATGPT_ACCOUNT_ID_CLAIM = "chatgpt_account_id"
 
 IMAGE_HELP_EPILOG = """\
 Backend selection:
-  auto: uses Codex OAuth only for GPT Image model ids when compatible auth is
-  available; every other model uses the configured OpenAI Images-compatible API.
-  codex-oauth: explicitly uses ~/.codex/auth.json or CODEX_AUTH_FILE.
-  openai-compatible-api: explicitly uses OPENAI_API_KEY, OPENAI_BASE_URL, and
-  an arbitrary provider image model id. It never receives Codex OAuth credentials.
+  auto/local-only: do not generate remotely; use native/SVG/source-extracted
+  reconstruction or an explicit local import. auto never reads OAuth files.
+  host-image-tool: an Agent-only declaration; pass --tool-name/--tool-call in
+  the run contract. This subprocess cannot call a host-native tool.
+  external-import: use image2ppt image import for an explicitly selected file.
+  openai-compatible-api: explicit remote transport using the configured API
+  model; actual calls require --allow-remote.
+  codex-oauth: legacy explicit remote transport using ~/.codex/auth.json or
+  CODEX_AUTH_FILE; actual calls require --allow-remote.
 
 Setup:
-  codex login
   image2ppt config --api-key "your-api-key" --image-backend openai-compatible-api \
     --base-url https://example.test/v1 --model provider-image-model
 
@@ -104,8 +125,8 @@ Output:
 
 GENERATE_HELP_EPILOG = """\
 Backend:
-  Uses --backend or IMAGE2PPT_IMAGE_BACKEND. In auto mode, Codex OAuth is used
-  only for GPT Image model ids; other model ids use the OpenAI-compatible API.
+  Uses --backend or IMAGE2PPT_IMAGE_BACKEND. auto/local-only never makes a
+  remote call. Explicit remote backends require --allow-remote.
 
 Use for:
   New supporting images that do not need to preserve an existing slide object.
@@ -117,8 +138,8 @@ Examples:
 
 EDIT_HELP_EPILOG = """\
 Backend:
-  Uses --backend or IMAGE2PPT_IMAGE_BACKEND. In auto mode, Codex OAuth is used
-  only for GPT Image model ids; other model ids use the OpenAI-compatible API.
+  Uses --backend or IMAGE2PPT_IMAGE_BACKEND. auto/local-only never makes a
+  remote call. Explicit remote backends require --allow-remote.
 
 Use for:
   Background cleanup, clean base creation, foreground icon extraction, and
@@ -185,7 +206,7 @@ def _default_model() -> str:
 
 
 def _default_backend() -> str:
-    return os.getenv("IMAGE2PPT_IMAGE_BACKEND", BACKEND_AUTO).strip().lower() or BACKEND_AUTO
+    return os.getenv("IMAGE2PPT_IMAGE_BACKEND", BACKEND_LOCAL_ONLY).strip().lower() or BACKEND_LOCAL_ONLY
 
 
 def _image_user_agent() -> Optional[str]:
@@ -213,12 +234,17 @@ def _is_codex_compatible_model(model: str) -> bool:
 def _validate_backend(backend: str) -> None:
     if backend not in ALLOWED_BACKENDS:
         _die(
-            "backend must be one of auto, codex-oauth, or openai-compatible-api."
+            "backend must be one of auto, local-only, host-image-tool, external-import, "
+            "openai-compatible-api, or explicitly selected codex-oauth."
         )
 
 
 def _select_backend(backend: str, model: str) -> str:
     _validate_backend(backend)
+    # ``auto`` is intentionally boring: no credential probe, no vendor/model
+    # ranking, and no automatic switch to a remote provider.
+    if backend == BACKEND_AUTO:
+        return BACKEND_LOCAL_ONLY
     if backend == BACKEND_CODEX_OAUTH:
         if not _is_codex_compatible_model(model):
             _die(
@@ -230,9 +256,7 @@ def _select_backend(backend: str, model: str) -> str:
         return BACKEND_CODEX_OAUTH
     if backend == BACKEND_OPENAI_COMPATIBLE:
         return BACKEND_OPENAI_COMPATIBLE
-    if _is_codex_compatible_model(model) and _codex_available():
-        return BACKEND_CODEX_OAUTH
-    return BACKEND_OPENAI_COMPATIBLE
+    return backend
 
 
 def _codex_auth_file() -> Path:
@@ -501,6 +525,65 @@ def _dependency_hint(package: str, *, upgrade: bool = False) -> str:
     )
 
 
+def _require_remote_authorization(args: argparse.Namespace) -> None:
+    """Reject an actual remote request unless the CLI gate was supplied."""
+
+    if getattr(args, "selected_backend", None) not in REMOTE_BACKENDS:
+        return
+    if getattr(args, "dry_run", False):
+        return
+    if not getattr(args, "allow_remote", False):
+        _die(
+            "Remote image calls are disabled by default. Re-run with "
+            "--allow-remote after confirming the bounded prompt/input upload and cost."
+        )
+
+
+def _reject_non_transport_backend(args: argparse.Namespace) -> None:
+    backend = getattr(args, "selected_backend", None)
+    if backend == BACKEND_LOCAL_ONLY:
+        _die(
+            "local-only does not generate or edit images; reconstruct native/SVG/source-extracted "
+            "objects locally or use external-import/image import."
+        )
+    if backend == BACKEND_EXTERNAL_IMPORT or backend == BACKEND_IMAGE_CLI_LEGACY:
+        _die("external-import is import-only; select an explicit local image and use image2ppt image import.")
+    if backend in AGENT_ONLY_BACKENDS:
+        tool_name = getattr(args, "tool_name", None) or "<declared host tool>"
+        tool_call = getattr(args, "tool_call", None) or "<declared call>"
+        _die(
+            f"{backend} is Agent-only ({tool_name}, {tool_call}); this subprocess cannot invoke a host-native tool."
+        )
+
+
+def _validate_host_declarations(args: argparse.Namespace) -> None:
+    if getattr(args, "selected_backend", None) not in AGENT_ONLY_BACKENDS:
+        return
+    for flag, value in (("--tool-name", args.tool_name), ("--tool-call", args.tool_call)):
+        if not value or not value.strip():
+            _die(f"{args.selected_backend} requires {flag} in the Agent-supplied contract.")
+        if len(value) > 512 or any(ord(char) < 32 for char in value):
+            _die(f"{flag} must be at most 512 characters with no control characters.")
+
+
+def _print_non_transport_dry_run(args: argparse.Namespace) -> None:
+    operation = "edit" if getattr(args, "command", "") == "edit" else "generate"
+    payload = {
+        "backend": args.selected_backend,
+        "operation": operation,
+        "prompt": _read_prompt(getattr(args, "prompt", None), getattr(args, "prompt_file", None)),
+        "remote_authorized": False,
+        "requires_allow_remote": args.selected_backend in REMOTE_BACKENDS,
+        "outputs": [str(path) for path in _build_output_paths(args.out)],
+        "tool_name": getattr(args, "tool_name", None),
+        "tool_call": getattr(args, "tool_call", None),
+        "subprocess_invocation": args.selected_backend not in AGENT_ONLY_BACKENDS,
+    }
+    if operation == "edit":
+        payload["input_images"] = list(getattr(args, "image", []))
+    _print_request(payload)
+
+
 def _ensure_api_key(dry_run: bool) -> None:
     if os.getenv("OPENAI_API_KEY"):
         print(f"OPENAI_API_KEY is set. API target: {_api_target_label()}.", file=sys.stderr)
@@ -765,6 +848,8 @@ def _run_codex_image(
         _print_request(
             {
                 "backend": "codex-oauth",
+                "remote_authorized": bool(getattr(args, "allow_remote", False)),
+                "requires_allow_remote": True,
                 "endpoint": endpoint_url,
                 "operation": operation,
                 "outputs": [str(p) for p in output_paths],
@@ -849,6 +934,8 @@ def _generate(args: argparse.Namespace) -> None:
         _print_request(
             {
                 "backend": "openai-compatible-api",
+                "remote_authorized": bool(getattr(args, "allow_remote", False)),
+                "requires_allow_remote": True,
                 "endpoint": "/v1/images/generations",
                 "outputs": [str(p) for p in output_paths],
                 **payload,
@@ -905,6 +992,8 @@ def _edit(args: argparse.Namespace) -> None:
         _print_request(
             {
                 "backend": "openai-compatible-api",
+                "remote_authorized": bool(getattr(args, "allow_remote", False)),
+                "requires_allow_remote": True,
                 "endpoint": "/v1/images/edits",
                 "outputs": [str(p) for p in output_paths],
                 **payload_preview,
@@ -1006,10 +1095,12 @@ def _add_shared_args(
         choices=sorted(ALLOWED_BACKENDS),
         default=_default_backend(),
         help=(
-            "Image transport backend. Defaults to IMAGE2PPT_IMAGE_BACKEND or auto. "
-            "Use openai-compatible-api for provider-specific models."
+            "Image backend contract. Defaults to IMAGE2PPT_IMAGE_BACKEND or local-only; "
+            "remote backends require --allow-remote."
         ),
     )
+    parser.add_argument("--tool-name", help="Declared host-image-tool name; never executed by this subprocess.")
+    parser.add_argument("--tool-call", help="Declared host-image-tool call; never executed by this subprocess.")
     parser.add_argument(
         "--model",
         default=_default_model(),
@@ -1031,6 +1122,11 @@ def _add_shared_args(
     if include_out:
         parser.add_argument("--out", default=DEFAULT_OUTPUT_PATH, help="Output file for one image.")
     parser.add_argument("--force", action="store_true", help="Overwrite existing output files.")
+    parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="Authorize this bounded generate/edit request to use an explicit remote backend.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Validate arguments and show the selected backend without calling it.")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Network timeout in seconds.")
 
@@ -1074,11 +1170,23 @@ asset sheets in image2ppt runs.
     args.size = args.size.strip()
     args.quality = args.quality.strip()
     _validate_model(args.model)
-    _validate_size(args.size, args.model)
-    _validate_quality(args.quality)
     args.selected_backend = _select_backend(args.backend, args.model)
+    if args.selected_backend in REMOTE_BACKENDS:
+        _validate_size(args.size, args.model)
+        _validate_quality(args.quality)
+    _validate_host_declarations(args)
+    _require_remote_authorization(args)
     if args.selected_backend == BACKEND_OPENAI_COMPATIBLE:
         _ensure_api_key(args.dry_run)
+
+    if args.selected_backend not in REMOTE_BACKENDS:
+        # local-only/import/host modes are useful as run contracts, but this
+        # command is specifically the image transport surface and cannot
+        # perform them or invoke a host-native tool.
+        if args.dry_run:
+            _print_non_transport_dry_run(args)
+            return 0
+        _reject_non_transport_backend(args)
 
     args.func(args)
     return 0

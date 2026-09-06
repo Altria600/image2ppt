@@ -313,9 +313,10 @@ class MultiAgentBackendTest(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("Backend selection:", result.stdout)
-        self.assertIn("auto uses Codex OAuth", result.stdout)
+        self.assertIn("auto resolves to local-only", result.stdout)
         self.assertIn("openai-compatible-api", result.stdout)
-        self.assertIn("image2ppt image edit --image pages/page_001/source.png", result.stdout)
+        self.assertIn("--allow-remote", result.stdout)
+        self.assertIn("--dry-run", result.stdout)
         self.assertNotIn("batch", result.stdout)
 
     def test_image_generate_help_limits_public_parameters(self):
@@ -655,10 +656,10 @@ class MultiAgentBackendTest(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(result.stdout)
-            self.assertEqual([str(source)], payload["image"])
+            self.assertEqual([str(source)], payload["input_images"])
             self.assertEqual("test", payload["prompt"])
 
-    def test_provider_specific_model_routes_to_api_even_when_codex_auth_exists(self):
+    def test_auto_stays_local_even_when_provider_credentials_exist(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "out.png"
             auth = Path(tmp) / "auth.json"
@@ -693,11 +694,9 @@ class MultiAgentBackendTest(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(result.stdout)
-            self.assertEqual("openai-compatible-api", payload["backend"])
-            self.assertEqual("/v1/images/generations", payload["endpoint"])
-            self.assertEqual("provider/imagine-image-v2", payload["model"])
-            self.assertNotIn("size", payload)
-            self.assertNotIn("quality", payload)
+            self.assertEqual("local-only", payload["backend"])
+            self.assertFalse(payload["remote_authorized"])
+            self.assertFalse(payload["requires_allow_remote"])
 
     def test_explicit_api_backend_overrides_codex_for_gpt_image_model(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -797,13 +796,13 @@ class MultiAgentBackendTest(unittest.TestCase):
             openai_client.call_args.kwargs["default_headers"],
         )
 
-    def test_runtime_backend_selection_is_model_aware_and_explicitly_overridable(self):
+    def test_runtime_backend_selection_is_local_first_and_explicitly_overridable(self):
         values = {
             "IMAGE2PPT_IMAGE_BACKEND": "auto",
             "IMAGE2PPT_IMAGE_MODEL": "provider/imagine-image-v2",
         }
         self.assertEqual(
-            ("openai-compatible-api", True),
+            ("local-only", True),
             runtime_env.select_image_backend(values, codex_ready=True, api_ready=True),
         )
         values.update(
@@ -850,7 +849,7 @@ class MultiAgentBackendTest(unittest.TestCase):
             self.assertEqual("image2ppt-test-client/1.0", config["IMAGE2PPT_IMAGE_USER_AGENT"])
             self.assertNotIn("test-api-key", result.stdout)
 
-    def test_image_edit_dry_run_prefers_codex_oauth_when_auth_exists(self):
+    def test_image_edit_dry_run_auto_stays_local_when_auth_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "source.png"
             out = Path(tmp) / "out.png"
@@ -881,17 +880,12 @@ class MultiAgentBackendTest(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(result.stdout)
-            self.assertEqual("codex-oauth", payload["backend"])
-            self.assertEqual("https://chatgpt.com/backend-api/codex/images/edits", payload["endpoint"])
+            self.assertEqual("local-only", payload["backend"])
             self.assertEqual("edit", payload["operation"])
             self.assertEqual([str(source)], payload["input_images"])
-            self.assertEqual("auto", payload["size"])
-            self.assertEqual("auto", payload["quality"])
-            self.assertEqual("auto", payload["background"])
-            for removed in ("moderation", "output_format", "output_compression", "n"):
-                self.assertNotIn(removed, payload)
+            self.assertFalse(payload["remote_authorized"])
 
-    def test_image_generate_dry_run_prefers_codex_images_endpoint_when_auth_exists(self):
+    def test_image_generate_dry_run_auto_stays_local_when_auth_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "out.png"
             auth = Path(tmp) / "auth.json"
@@ -918,15 +912,9 @@ class MultiAgentBackendTest(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(result.stdout)
-            self.assertEqual("codex-oauth", payload["backend"])
-            self.assertEqual("https://chatgpt.com/backend-api/codex/images/generations", payload["endpoint"])
+            self.assertEqual("local-only", payload["backend"])
             self.assertEqual("generate", payload["operation"])
-            self.assertEqual([], payload["input_images"])
-            self.assertEqual("auto", payload["size"])
-            self.assertEqual("auto", payload["quality"])
-            self.assertEqual("auto", payload["background"])
-            for removed in ("moderation", "output_format", "output_compression", "n"):
-                self.assertNotIn(removed, payload)
+            self.assertFalse(payload["remote_authorized"])
 
     def test_codex_oauth_retries_transport_and_5xx_only(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1051,7 +1039,7 @@ class MultiAgentBackendTest(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(result.stdout)
-            self.assertEqual({"pypdfium2", "PIL", "openai", "yaml", "numpy", "requests"}, set(payload["dependencies"]))
+            self.assertEqual({"pypdfium2", "PIL", "openai", "yaml", "numpy", "requests", "resvg_py"}, set(payload["dependencies"]))
             self.assertFalse(payload["image_backend"]["agent_builtin"]["checked"])
             self.assertIsNone(payload["image_backend"]["agent_builtin"]["ready"])
             self.assertEqual(str(ROOT), payload["skill_root"])
@@ -1118,7 +1106,7 @@ class MultiAgentBackendTest(unittest.TestCase):
             self.assertEqual("ok", second_payload["setup"])
             self.assertEqual(before, config_path.read_text(encoding="utf-8"))
 
-    def test_unified_cli_backend_defaults_to_image2ppt_image_cli(self):
+    def test_unified_cli_backend_defaults_to_local_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = make_minimal_run(tmp)
             result = subprocess.run(
@@ -1137,9 +1125,9 @@ class MultiAgentBackendTest(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             deck = read_json(run_dir / "deck_manifest.json")
             backend = deck["image_backend"]
-            self.assertEqual("image2ppt-image-cli", backend["backend_id"])
-            self.assertEqual("image2ppt image", backend["tool_name"])
-            self.assertEqual("image2ppt image generate/edit", backend["tool_call"])
+            self.assertEqual("local-only", backend["backend_id"])
+            self.assertIsNone(backend["tool_name"])
+            self.assertIsNone(backend["tool_call"])
             self.assertFalse(backend["requires_openai_api_key"])
 
     def test_prepare_writes_default_backend_contract(self):
@@ -1166,7 +1154,7 @@ class MultiAgentBackendTest(unittest.TestCase):
             deck_path = Path(deck_line)
             self.assertTrue(deck_path.exists())
             deck = read_json(deck_path)
-            self.assertEqual("image2ppt-image-cli", deck["image_backend"]["backend_id"])
+            self.assertEqual("local-only", deck["image_backend"]["backend_id"])
             request = read_json(deck_path.parent / "pages/page_001/page_request.json")
             self.assertEqual(deck["image_backend"], request["image_backend"])
 
@@ -1195,11 +1183,8 @@ class MultiAgentBackendTest(unittest.TestCase):
                 {"generate": ["prompt"], "edit": ["prompt", "referenced_image_paths"]},
                 backend["required_parameters"],
             )
-            self.assertEqual(["codex-oauth", "openai-compatible-api"], backend["fallback_order"])
-            self.assertEqual(
-                ["tool-unavailable", "tool-error", "input-unreadable", "no-valid-local-output"],
-                backend["fallback_policy"]["on"],
-            )
+            self.assertEqual([], backend["fallback_order"])
+            self.assertEqual([], backend["fallback_policy"]["on"])
             self.assertFalse(backend["fallback_policy"]["missing_optional_parameters"])
             self.assertIn("view_image", backend["input_context_policy"])
             self.assertIn("never scan for the newest file", backend["save_path_policy"])
@@ -1253,10 +1238,12 @@ class MultiAgentBackendTest(unittest.TestCase):
             normalized_prompt = prompt_text.replace("\\", "/")
             expected_reference = str(ROOT / "references/page-decision-tree.md").replace("\\", "/")
             self.assertIn(expected_reference, normalized_prompt)
-            self.assertIn("image_gen.imagegen", prompt_text)
-            self.assertIn("referenced_image_paths", prompt_text)
-            self.assertIn("Missing `mask`, `model`, `size`, `quality`, or `out` never triggers fallback", prompt_text)
-            self.assertIn('never a scanned "newest" file', prompt_text)
+            self.assertIn("BACKEND:", prompt_text)
+            self.assertIn("local-only", prompt_text)
+            self.assertIn("host-image-tool", prompt_text)
+            self.assertIn("builtin-imagegen", prompt_text)
+            self.assertIn("external-import", prompt_text)
+            self.assertIn("no silent fallback", prompt_text)
 
             local_dispatch = subprocess.run(
                 [
@@ -1278,8 +1265,14 @@ class MultiAgentBackendTest(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
-            self.assertNotEqual(0, local_dispatch.returncode)
-            self.assertIn("--local dispatch is only allowed", local_dispatch.stdout + local_dispatch.stderr)
+            self.assertEqual(0, local_dispatch.returncode, local_dispatch.stdout + local_dispatch.stderr)
+            # A host without subagents can claim pages sequentially. Reset this
+            # fixture before exercising the separate worker-dispatch path.
+            jobs = read_json(run_dir / "page_jobs.json")
+            self.assertEqual("local", jobs["pages"][0]["dispatch"]["execution_mode"])
+            jobs["pages"][0]["status"] = "pending"
+            jobs["pages"][0].pop("dispatch")
+            write_json(run_dir / "page_jobs.json", jobs)
 
             dispatch = subprocess.run(
                 [
@@ -1492,7 +1485,7 @@ class MultiAgentBackendTest(unittest.TestCase):
                 "skip-view-image",
             )
             self.assertNotEqual(0, result.returncode)
-            self.assertIn("cannot override the fixed builtin-imagegen contract", result.stderr)
+            self.assertIn("cannot override the fixed builtin-imagegen", result.stderr)
 
     def test_all_pending_pages_are_dispatchable(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1967,7 +1960,7 @@ class MultiAgentBackendTest(unittest.TestCase):
                 "tool-error",
             )
             self.assertNotEqual(0, inconsistent_result.returncode)
-            self.assertIn("--fallback-reason requires --backend", inconsistent_result.stderr)
+            self.assertIn("fallback producer", inconsistent_result.stderr)
             self.assertFalse((page_dir / "assets/generated.png").exists())
 
             invalid_pairs = [

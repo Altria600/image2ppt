@@ -1,5 +1,13 @@
 # Standard Manifest Arrow Extension
 
+For `rightArrow`, `leftArrow`, `upArrow`, and `downArrow`, measure the source
+head length and shaft thickness when the default silhouette differs. Record
+`source_head_length_px` and `source_shaft_thickness_px` together with `box_px`.
+The builder writes native AutoShape adjustment handles; these fields do not
+split the arrow into multiple objects. For a 380 by 100 px right arrow with a
+100 px head and 50 px shaft, use values `100` and `50`. Compare the actual PPTX
+render, since the lightweight preview does not reproduce every preset handle.
+
 These fields extend the local standard `pages/page_NNN/manifest.json`. All manifest fields, source-pixel coordinate rules, inventories, quality checks, and provenance rules remain mandatory.
 
 ## Thin connector arrow
@@ -61,3 +69,5 @@ The local builder creates one AutoShape from `preset`; the postprocessor names i
 The profile treats a line as an arrow only when at least one start/end arrow field is non-empty, and treats a non-line shape as an arrow only when its `preset` is one of the supported arrow presets. Ordinary lines and ordinary shapes are untouched.
 
 The postprocessor mirrors the local builder's stable `(z_index, original order)` object-id assignment. Therefore the manifest remains independently reproducible at page and final-deck level; no page-local build script or separate plan is allowed.
+
+Hand-drawn, textured, gradient, or illustrated arrows are not ordinary structural arrows. If their identity cannot be represented by the native presets, route the bounded visual as `source-extracted` or an explicitly selected `image-edited` asset with `transform: image-edit`, `editability: raster-image`/`svg-image`, and full provenance. This exception does not permit flattening an ordinary arrow or an entire diagram.

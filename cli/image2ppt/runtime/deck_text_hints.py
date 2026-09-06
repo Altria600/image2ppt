@@ -6,7 +6,8 @@ Runs as part of `image2ppt prepare`, after page directories exist: each
 files so page workers find their text measurements already in place.
 
 Backend selection per run:
-- With a PaddleOCR token (PADDLE_OCR_TOKEN env var, or PADDLE_OCR_TOKEN in the
+- With explicit --allow-remote-ocr authorization and a PaddleOCR token
+  (PADDLE_OCR_TOKEN env var, or PADDLE_OCR_TOKEN in the
   active config.yaml): an original PDF is submitted as one multi-page job;
   image and PPTX inputs submit each normalized source.png as its own job.
   OCR coordinates are rescaled to each page's actual source.png resolution
@@ -89,6 +90,7 @@ def main() -> int:
     parser.add_argument("run", help="Run directory or deck_manifest.json path.")
     parser.add_argument("--timeout", type=int, default=300, help="OCR job timeout in seconds.")
     parser.add_argument("--no-overlay", action="store_true", help="Skip the labeled overlay images.")
+    parser.add_argument("--allow-remote-ocr", action="store_true", help="Authorize uploading this run's pages to the configured PaddleOCR service.")
     args = parser.parse_args()
 
     run_dir = run_dir_from_target(args.run)
@@ -100,21 +102,14 @@ def main() -> int:
         print("text-hints: no pages with source.png; skipped", file=sys.stderr)
         return 0
 
-    token = paddle_token()
+    token = paddle_token() if args.allow_remote_ocr else ""
     results: dict[Path, dict] = {}
     backend = "builtin-ink"
     if not token:
         print(
-            "text-hints: no PaddleOCR token configured; falling back to the built-in offline "
-            "detector (geometry only — it measures where text is and how large, but cannot read "
-            "it). A free PaddleOCR-VL token adds recognized text content and cleaner block "
-            "boundaries, noticeably improving text fidelity in the final PPT. The free personal quota "
-            "is currently more than enough for this skill, so applying is risk-free with no extra "
-            "cost. ASK THE USER once "
-            "before reconstructing pages: configure a token now (apply at "
-            "https://aistudio.baidu.com/account/accessToken, then `image2ppt config "
-            "--paddle-ocr-token <token>` and `image2ppt run hints <run>` to regenerate this run's "
-            "hints), or continue with the offline result. Respect their choice and do not ask again.",
+            "text-hints: using the built-in offline detector (geometry only; it does not "
+            "recognize characters). Remote OCR requires a configured PaddleOCR token and "
+            "explicit --allow-remote-ocr authorization for this run.",
             file=sys.stderr,
         )
     if token:

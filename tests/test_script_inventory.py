@@ -46,6 +46,33 @@ class ScriptInventoryTests(unittest.TestCase):
     def test_no_symlink_escapes_the_skill(self) -> None:
         escaped = []
         for path in ROOT.rglob("*"):
+            # The distributable Skill excludes local environments, caches,
+            # outputs, and tests.  A normal venv contains a python symlink to
+            # its interpreter outside the repository; do not classify that
+            # local runtime link as a shipped Skill asset.
+            relative = path.relative_to(ROOT)
+            if any(
+                part in {
+                    ".git",
+                    ".venv",
+                    "venv",
+                    "__pycache__",
+                    ".pytest_cache",
+                    ".mypy_cache",
+                    ".ruff_cache",
+                    ".tox",
+                    ".nox",
+                    "build",
+                    "dist",
+                    "node_modules",
+                    "output",
+                    "outputs",
+                    "artifacts",
+                    "tests",
+                }
+                for part in relative.parts
+            ):
+                continue
             if path.is_symlink():
                 try:
                     path.resolve().relative_to(ROOT.resolve())

@@ -47,7 +47,7 @@ long, work in this order:
 
 Run `image2ppt page validate` after each build. An estimated overflow is a page
 contract failure, so repair the manifest and render again instead of accepting
-a smaller per-box fallback.
+a one-off per-box reduction.
 
 ## Render checks
 

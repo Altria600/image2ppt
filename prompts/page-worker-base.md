@@ -1,66 +1,123 @@
-# Page Reconstructor Prompt Template
+# Page Reconstructor Prompt
 
-Placeholders of the form `{{NAME}}` are filled by `scripts/build_page_worker_prompt.py`.
+占位符 `{{NAME}}` 由 `scripts/build_page_worker_prompt.py` 填充。
 
 ```text
-Rebuild one page for Image2PPT.
+Rebuild one existing source page for Image2PPT.
 
 Run dir: {{RUN_DIR}}
 Page id: {{PAGE_ID}}
 Page dir: {{PAGE_DIR}}
 Source image: {{SOURCE_IMAGE}}
 
-You own only this Page dir. Do not edit deck_manifest.json, page_jobs.json, notes_manifest.json, final outputs, the original input, or any other page directory.
+You own only this Page dir. Do not edit deck_manifest.json, page_jobs.json,
+notes_manifest.json, final outputs, the original input, or another page.
 
-MANDATORY FIRST ACTION — before looking at the source image, before any decision, before any tool call other than reading: read these three files in full. Do not skim, do not rely on prior knowledge of them, do not start reconstruction first and consult them later. Every past failure mode of this skill is encoded in them; any decision made without having read them is invalid and will be redone.
-- {{SKILL_ROOT}}/references/page-decision-tree.md — the single source of truth for all object-source decisions: the three-step decision process, text-hints usage, the final self-check, and the fix-versus-warning split.
-- {{SKILL_ROOT}}/references/manifest-schema.md — the field contracts for manifest.json, validation.json, page_result.json, and imagegen-jobs.json.
-- {{SKILL_ROOT}}/references/cli-helper.md — local Image2PPT command syntax and examples.
+MANDATORY FIRST ACTION: before inspecting source.png or making any object
+decision, read these files in full:
+- {{SKILL_ROOT}}/references/page-decision-tree.md
+- {{SKILL_ROOT}}/references/manifest-schema.md
+- {{SKILL_ROOT}}/references/cli-helper.md
 
-Hard rules (reminders only; the details and rationale live in the references above):
-1. Every non-text foreground visual object must be separated through the image-edit asset-sheet workflow per page-decision-tree.md section 2. Backend fallback never permits an object-source fallback: no native-shape/emoji/text-symbol approximation, no direct source.png crops, no downgrade to a warning.
-2. Execute the three steps in order: (1) background recognition and repair, (2) foreground asset separation, (3) native element reconstruction. Do not consume the text hints in your page dir before the step-1/2 decisions are recorded.
-3. manifest.json is the authoritative build source for page validation and final deck assembly. Build page.pptx and preview.png from manifest.json with the deterministic runtime, never with separate page-local PowerPoint code that bypasses the manifest.
-4. All box_px / points_px / polygon_px values are source.png pixels. Reuse page_request.json.slide and page_request.json.content_box unchanged — do not convert the page to 16:9 or recalculate the canvas; the runtime maps source-pixel coordinates into content_box. Positioned objects without coordinates are page failures.
-5. Complete a typography inventory and visual style anchor before authoring repeated objects. Set `typography_policy: governed` for this new manifest, then use shared `text_style_id` and `alignment_group`/`role` values where a level or alignment rail repeats; same-level text keeps one font, size, and line height. The governed builder never silently shrinks one box. Repair dense copy with semantic line breaks or box changes, then resize a complete same-level group only if needed.
-6. validation.json must contain a top-level boolean `passed`. Deterministic validation passing never waives an object-source rule.
-7. Every page path and write must resolve inside this Page dir. Do not use `..`, an absolute escape, or a symlink to reach another page, the run root, or any external directory.
-8. New manifests use `schema_version: 2`, structured visual classifications, and specific `quality_evidence`; a formula render failure remains a hard failure unless the user explicitly approves that exact exception in the manifest.
+Read only the additional contracts required by this page:
+- structured page: region-decomposition.md and object-routing.md
+- arrows: manifest-arrow-extension.md
+- assets/PDF/style: assets-provenance-contract.md and source-fidelity-style-contract.md
+- repeated text: typography-alignment-contract.md
+- acceptance: qa-contract.md
 
-Image backend: execute `page_request.json.image_backend` using the authoritative field contract in `manifest-schema.md`. For `backend_id: builtin-imagegen`, the high-risk reminder is: use `image_gen.imagegen` first; generation needs only `prompt`, while editing requires `view_image` first and then `prompt` plus absolute local `referenced_image_paths`. Missing `mask`, `model`, `size`, `quality`, or `out` never triggers fallback. Import only the exact valid local result path (`output_hint` when supplied), never a scanned "newest" file; enter `{{CLI}} image generate/edit` only for a matching `fallback_policy.on` event. If that fallback cannot produce the required image, stop the page with `validation.json.passed=false`. In a network-restricted runtime, request any required approval and state that only task-local prompts and required page images/masks/references are uploaded for this user-requested conversion.
+Goal: reconstruct the existing page as a measured, mixed PowerPoint page. The
+page is not a new deck. Keep the visible source identity and record what is
+actually editable; do not claim that an SVG image is a native PowerPoint path.
 
-Goal: rebuild the source page as object-level editable PowerPoint. Do not invent an object-source strategy outside `page-decision-tree.md`.
+SOURCE ROUTING (record before writing objects):
+1. Native text, cards, tables, ordinary borders, ordinary lines, and ordinary
+   arrows stay native. A simple arrow is one connector or one AutoShape, not a
+   shaft plus a separate head.
+2. A flat icon or simple mark may become a faithful SVG image. Record
+   source_type=svg-reconstructed, editability=svg-image, source_box_px, and
+   identity_evidence.
+3. If source paths are traceable, local VTracer is allowed when installed.
+   Prepare a page-local raster file containing only the target local visual;
+   `--box` records source geometry and does not crop a full-page input. Record
+   source_type=vector-traced, editability=svg-image, and source_box_px; use the
+   original raster source for provenance and inspect the SVG for scripts,
+   remote references, and raster payloads.
+4. For photos, textures, complex illustrations, or hard-to-measure chart
+   fragments, prefer a bounded asset extracted from the original source.
+   Record source_type=source-extracted, editability=raster-image or svg-image,
+   source_box_px, identity_evidence, and a passed contamination_check with a
+   concrete observation. Preserve the source identity and exact local boundary.
+5. Use an explicitly selected image-edit/generation backend only when local
+   extraction or background repair cannot preserve the visible source. Record
+   source_type=image-edited, transform=image-edit, producer, model, inputs, prompt,
+   and reason. Never silently switch
+   backend, invent credentials, or replace a failed path with a lookalike.
+6. Never use one full-page, full-card, full-table, or full-chart bitmap to skip
+   object reconstruction. Do not redraw a complex asset into a different visual
+   identity merely to make it editable.
 
-If the page dir already contains artifacts (manifest.json, page.pptx, validation.json, assets, ...) from a previous failed attempt, treat them as untrusted: run the full decision process yourself and re-derive every artifact. Never flip a leftover validation.json to `passed: true` or return leftover outputs without having rebuilt and re-verified them — the previous attempt failed for a reason recorded in its validation.json; read it.
+BACKEND:
+- Read page_request.json.image_backend exactly. The default is local-only.
+- host-image-tool requires the explicit tool_name and tool_call in the contract.
+- builtin-imagegen is compatibility-only and is used only when selected.
+- external-import accepts only a user-selected local file.
+- openai-compatible-api and codex-oauth are explicit choices only. Codex OAuth
+  credentials are never auto-read and there is no silent fallback.
+- If the selected tool is unavailable, the input is unreadable, or no valid
+  local output is returned, write a concrete blocked/failed result. Preserve
+  completed artifacts; do not make an approximate page to pass validation.
 
-Work through the page in this order:
-1. Build the page inventory (Pre-Decision Checklist in page-decision-tree.md).
-2. Decide the background (page-decision-tree.md section 1) and record `background_strategy`.
-3. Decide and separate foreground assets (section 2). Run step-1/2 image jobs serially through the backend order above; do not use a batch interface. Put icons/foreground objects onto one sparse asset sheet when they fit, with generous gaps between objects for clean splitting; create multiple sheets only when one sheet cannot fit them. After each selected local output, record and process it with `{{CLI}} image import` and `{{CLI}} image process-sheet`.
-4. Rebuild native text, shapes, and tables (section 3). Fill `text_boxes` from the measured text hints per section 3.1; render formulas with `{{CLI}} formula render-latex` per section 3.2. Divide structured pages into 3–8 semantic regions (1–2 only for a genuinely simple page), and record the shared style/alignment decisions before drawing repeated cards or columns.
-5. Write a schema-v2 manifest.json following the field contracts in manifest-schema.md, including `text_inventory`, structured `visual_inventory`, `background_strategy`, `quality_checks`, `quality_evidence`, and positioned `text_boxes`/`images`/`shapes`.
-6. Build the artifacts with the deterministic runtime: `{{CLI}} page build {{PAGE_DIR}}` (writes page.pptx and preview.png from manifest.json), then `{{CLI}} page contact-sheet {{PAGE_DIR}}`, then `{{CLI}} page validate {{PAGE_DIR}}` — it runs the same manifest-contract checks `{{CLI}} run record` will run, so fix every reported issue here, inside the page.
+OCR:
+- Use local text geometry by default. Do not upload or read a Paddle token.
+- Remote OCR is allowed only for a current prepare/run hints invocation when
+  the user explicitly supplied --allow-remote-ocr; this is not persisted in
+  page_request.json or another page-state field.
+- Text hints are advisory. Read characters from the source and make all
+  readable editable text real visible native text boxes.
 
-The Page dir must contain when you return:
+WORK ORDER:
+1. Inventory page size, text roles, background, visual objects, structural
+   primitives, formulas, regions, and corner geometry.
+2. Divide a structured page into 3-8 semantic regions (1-2 only when genuinely
+   simple). Measure source-pixel coordinates and record each route.
+3. Set typography_policy=governed. Reuse text_style_id and
+   alignment_group/role for repeated levels and rails. Repair wrapping and box
+   geometry before changing a whole level's size; never silently shrink one box.
+4. Write schema-v2 manifest.json. Every positioned text/image/shape has box_px,
+   points_px, or bezier_px. Add visual_inventory, asset_provenance,
+   quality_checks, quality_evidence, and image2ppt_region_decomposition when
+   relevant. Keep all paths inside this page directory.
+5. Build and validate with the local CLI. The host supplies executable,
+   page-local commands; keep PAGE_DIR as the owned working directory:
+   {{PAGE_BUILD_COMMAND}}
+   {{PAGE_VALIDATE_COMMAND}}
+6. Run the page QA:
+   {{PAGE_QA_COMMAND}}
+   If a renderer exists, inspect source.png against the actual render and
+   complete hash-bound visual-review evidence. Without a renderer, leave QA
+   pending/unevaluated and report that limitation; never mark it reviewed from
+   structural validation alone.
+7. Create the standard page_result.json only after every required gate passes.
+
+Required page artifacts:
 - manifest.json
 - imagegen-jobs.json
 - page.pptx
 - preview.png
 - split_assets_contact.png
-- validation.json
+- validation.json (top-level boolean passed)
 - page_result.json
 
-validation.json and page_result.json must follow the exact shapes defined in manifest-schema.md: validation.json carries the top-level boolean `passed` (not only a nested or renamed field), and page_result.json carries the minimal required key set.
-
-Before returning, run the Final Self-Check in page-decision-tree.md once: compare preview.png and split_assets_contact.png to the source, confirm `{{CLI}} page validate {{PAGE_DIR}}` passes, confirm validation.json contains top-level `passed: true`, and confirm all required outputs exist. Page-local issues are fixed inside the current page by you before returning.
-
-On failure — when a hard rule cannot be satisfied or a required tool is unavailable — stop and return a page failure: write validation.json with `"passed": false` and the concrete failure reason (what failed, the exact error, what the parent must fix), plus page_result.json referencing whatever artifacts exist (omit keys for artifacts that were never produced). Do not fabricate the remaining artifacts and do not build an approximate page to make validation pass; the parent agent will fix the root cause and dispatch or claim a fresh page execution.
+On failure, write validation.json with passed=false and the concrete failed
+condition, then write page_result.json with only paths for artifacts that exist.
+Do not fabricate missing render, asset, or validation evidence.
 
 Return only:
-page_manifest=`<absolute path>`
-page_pptx=`<absolute path>`
-preview=`<absolute path>`
-contact_sheet=`<absolute path>`
-validation=`<absolute path>`
-page_result=`<absolute path>`
+page_manifest=<absolute path>
+page_pptx=<absolute path>
+preview=<absolute path>
+contact_sheet=<absolute path>
+validation=<absolute path>
+page_result=<absolute path>
 ```

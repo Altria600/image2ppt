@@ -1,33 +1,12 @@
 # Manifest Schema
 
-This document describes the responsibilities, owners, and current field contracts for `image2ppt` run/page JSON files. All key state is advanced by `image2ppt` commands; page reconstructors write only page-local files.
+本文件描述运行级、页级和资产 provenance 的字段合同。所有状态由本地 CLI 推进；页面 worker 只写自己的页面目录。新字段由路由和运行时共同维护，旧 manifest 仍按兼容规则读取。
 
-## Contents
+## 1. 运行级文件
 
-- `deck_manifest.json`
-- `page_jobs.json`
-- `page_request.json`
-- `page_result.json`
-- `pages/page_NNN/validation.json`
-- `pages/page_NNN/manifest.json`
-- `pages/page_NNN/imagegen-jobs.json`
-- `notes_manifest.json`
+### `deck_manifest.json`
 
-## `deck_manifest.json`
-
-Owner: created by `image2ppt prepare`; `image2ppt run backend` may update the image backend; `image2ppt run finalize` reads it and writes completion time.
-
-Purpose:
-
-- Input type.
-- Page order.
-- Page manifest paths.
-- Notes manifest path.
-- Final output path.
-- Run-level image backend contract.
-- Original user request.
-
-Key fields:
+由 `prepare` 创建，`run backend` 可更新 backend，`run finalize` 读取并写入完成信息。它记录输入类型、页序、画布、备注、最终输出和 `image_backend`。
 
 ```json
 {
@@ -36,26 +15,10 @@ Key fields:
   "input_type": "image|images|pdf|pptx",
   "max_concurrent_pages": 6,
   "image_backend": {
-    "backend_id": "builtin-imagegen",
-    "tool_name": "image_gen.imagegen",
-    "required_parameters": {
-      "generate": ["prompt"],
-      "edit": ["prompt", "referenced_image_paths"]
-    },
-    "input_context_policy": "generate with prompt; before editing, view_image each input, then use prompt plus absolute local referenced_image_paths",
-    "save_path_policy": "use only an explicit valid local result/output_hint path, then image2ppt image import; never scan for a newest file",
-    "fallback_command": "image2ppt image generate/edit",
-    "fallback_order": ["codex-oauth", "openai-compatible-api"],
-    "fallback_selection_policy": "auto uses codex-oauth only for GPT Image model ids with compatible auth; all other model ids use openai-compatible-api",
-    "fallback_policy": {
-      "on": [
-        "tool-unavailable",
-        "tool-error",
-        "input-unreadable",
-        "no-valid-local-output"
-      ],
-      "missing_optional_parameters": false
-    }
+    "backend_id": "local-only",
+    "tool_name": null,
+    "tool_call": null,
+    "model": null
   },
   "pages": [],
   "notes_manifest": "notes_manifest.json",
@@ -63,39 +26,27 @@ Key fields:
 }
 ```
 
-`image_backend` is written by `image2ppt prepare` and may be overwritten by `image2ppt run backend` when needed. Parent-level backend selection policy lives in `SKILL.md` under "Image backend selection".
+运行级 backend 合同会原样复制给每个 `page_request.json`；页级 worker 不得删减、重排或改写其中的授权和路径边界。旧运行可继续带有 `required_parameters`、`input_context_policy`、`save_path_policy` 等字段，但这些字段不能授权 fallback 或隐式联网。
 
-For `backend_id: "builtin-imagegen"`, these fields are required and have fixed meanings:
+`backend_id` 是显式合同，可选值：
 
-- `tool_name`: `image_gen.imagegen`, an agent tool rather than a Python or shell API.
-- `required_parameters`: the complete required argument sets. Generation needs `prompt`; editing needs `prompt` plus absolute local paths in `referenced_image_paths`.
-- `input_context_policy`: requires `view_image` on every edit input before the built-in call; generation has no image input.
-- `save_path_policy`: permits only an explicit valid local result path, including `output_hint`, followed by `image2ppt image import`; newest-file directory scanning is forbidden.
-- `fallback_command`: the CLI surface used only after the fallback policy matches.
-- `fallback_order`: the two permitted CLI producers, retained for provenance compatibility.
-- `fallback_selection_policy`: model-aware routing inside the CLI: `auto` uses Codex OAuth only for compatible GPT Image ids and otherwise selects the configured OpenAI Images-compatible API. An explicit CLI `--backend` overrides `auto`.
-- `fallback_policy.on`: the only events that permit leaving the built-in tool: it is unavailable/not callable, its call errors, an edit input is unreadable, or it returns no valid local image.
-- `fallback_policy.missing_optional_parameters`: always `false`; absent optional controls never authorize fallback.
+- `local-only`：默认，本地解析、原图局部提取、SVG、VTracer（若安装）和确定性构建；
+- `host-image-tool`：必须同时有用户提供的 `tool_name`、`tool_call`；
+- `builtin-imagegen`：兼容显式选择的宿主 `image_gen.imagegen`；
+- `external-import`：只导入用户明确提供的本地资产；
+- `openai-compatible-api`：用户显式授权的 OpenAI Images-compatible 协议；
+- `codex-oauth`：用户显式选择，禁止自动读取或推断 OAuth 凭据。
 
-Other backend metadata may describe model labels, runtime homes, or handoff text, but it does not change this order. Parent-level tool selection and user-interaction policy live in `SKILL.md` under "Image backend selection"; page reconstructors execute the copied contract above.
+选择后不可静默切换。`tool_name`、`tool_call`、`model`、`input_context_policy`、`output_policy`、`producer` 和失败原因只描述实际使用的能力；它们不能扩展授权或隐藏失败。第三方 provider 按协议能力选择，不按名称、国家或语言选择。
 
-## `page_jobs.json`
+### `page_jobs.json`
 
-Owner: created by `image2ppt prepare`, updated by `image2ppt run` commands.
-
-Purpose:
-
-- Source of truth for page state.
-- Dispatch records.
-- Result records.
-
-Structure:
+由 `prepare` 创建，由 `run next/dispatch/record/reset/finalize` 更新，是唯一页面生命周期源：
 
 ```json
 {
   "schema_version": 1,
   "run_id": "job-id",
-  "max_concurrent_pages": 6,
   "pages": [
     {
       "page_id": "page_001",
@@ -110,52 +61,17 @@ Structure:
 }
 ```
 
-`dispatch` is written by `image2ppt run dispatch`. It includes `execution_mode`: `"worker"` for normal page-worker dispatch and `"local"` for the parent agent's single-page local claim; older dispatch records without this field are treated as `"worker"`. A page with status `dispatched` is an active execution lease until explicit completion, failure, cancellation, or lost-worker verification; elapsed time alone does not make it lost. `result` is written by `image2ppt run record`. `accepted` is written by `image2ppt run finalize`.
+`dispatch.execution_mode` 为 `worker` 或 `local`。`local` 也适用于多页任务，但同一个 main agent 同时只能持有一个 local lease；完成 `record` 或 `reset` 后再领取下一页。超时本身不等于 worker 丢失。`max_concurrent_pages` 是并发上限，不是强制并发数。
 
-## `page_request.json`
+### `page_request.json`
 
-Owner: `image2ppt prepare`.
+由 `prepare` 创建，定义页 id、页目录、源图、源像素尺寸、`slide`、`content_box`、并发上限、允许写入范围、禁止路径、必需产物、用户限制和 `image_backend`。远程 OCR 的 `--allow-remote-ocr` 是当前调用参数，不写入 page request。它不预测页面类型，也不提前决定对象来源。页面必须复制 `slide`/`content_box` 和源像素尺寸，不能自行拉伸成 16:9。
 
-Purpose: task boundary for the page worker.
+## 2. 页面结果
 
-Includes:
+### `page_result.json`
 
-- page id
-- page directory
-- source image
-- slide size
-- content box
-- max concurrent pages
-- allowed write scope
-- required outputs
-- user constraints
-- image backend contract
-
-Must not include:
-
-- page type prediction
-- `imagegen_required` prediction
-- object-level decisions
-
-If the run uses an image backend, `page_request.json` must contain the same `image_backend` object without weakening or reordering its `fallback_policy` or `fallback_order`.
-
-`slide` and `content_box` are computed automatically by `image2ppt prepare`. Inputs close to 16:9 use the standard widescreen canvas; other inputs use a custom canvas converted from the source image pixel dimensions. The agent must copy these two fields into the page `manifest.json` and must not compress, stretch, or recalculate the canvas.
-
-## `page_result.json`
-
-Owner: created by the page reconstructor, validated by `image2ppt run record`.
-
-Includes:
-
-- manifest path
-- imagegen jobs path
-- page pptx path
-- preview path
-- contact sheet path
-- validation path
-- page-local output hashes, which may be supplemented by `image2ppt run record`
-
-Minimal required shape (paths are relative to the page directory):
+由页面 worker 创建，路径均相对页面目录：
 
 ```json
 {
@@ -169,168 +85,122 @@ Minimal required shape (paths are relative to the page directory):
 }
 ```
 
-Every path in this object must resolve inside the owning page directory. Absolute
-paths, `..` traversal, and symlink escapes are rejected even if the target exists.
+缺失产物不得虚构路径；所有路径必须相对且 resolve 在所属 page dir，绝对路径、`..` 和 symlink escape 都拒绝。`run record` 还会校验 hashes、页面 manifest 和顶层 `validation.json.passed: true`。`page.pptx` 是页级产物，最终装配仍从已记录的 manifest 按页序重建。
 
-The `manifest` artifact is the authoritative page source for final assembly. `image2ppt run finalize` rebuilds the final deck from recorded page manifests in page order. The `page_pptx` artifact remains a page-level deliverability artifact and is validated by `image2ppt run record`, but it is not the final assembly input.
+### `validation.json`
 
-## `pages/page_NNN/validation.json`
-
-Owner: created by the page reconstructor, read by `image2ppt run record`.
-
-Purpose: page-level deliverability conclusion.
-
-Must contain at top level:
+必须有顶层布尔值：
 
 ```json
-{
-  "passed": true
-}
+{"passed": true}
 ```
 
-`passed` must be a boolean. `image2ppt run record` only reads top-level `passed` to decide whether the page can enter final assembly. `status: "pass"`, `runtime_validation.passed`, or other nested fields may remain as supplemental information, but they cannot replace top-level `passed`.
+结构校验、区域检查和视觉 QA 可以写入附加字段；嵌套的 `passed` 或 free-text 不能替代顶层值。没有渲染器时可以构建和做结构检查，但 `visual_review_status` 应保持 pending/unsupported，不能据此写 true。
 
-## `pages/page_NNN/manifest.json`
+## 3. `manifest.json`
 
-Owner: page reconstructor. New manifests use `schema_version: 2`; schema version 1
-remains readable for existing runs. The machine-readable v2 contract is
-`schemas/page-manifest-v2.schema.json`.
+新页使用 `schema_version: 2` 和 `typography_policy: governed`；v1 仍可读。manifest 是页面构建和最终装配的唯一来源，不是对另一个手写 PPTX 的摘要。
 
-Purpose: source of truth for page-level PPTX construction.
+必需字段：
 
-The manifest is not a summary of a separately authored `page.pptx`. It is the build contract for both page-level validation and final deck assembly. A page may not pass validation if the page PPTX can only be reproduced by custom page-local code while the manifest lacks object positions.
+```text
+schema_version, typography_policy, slide, content_box, source,
+page_strategy, text_inventory, visual_inventory, background_strategy,
+quality_checks, quality_evidence, text_boxes, shapes, images,
+asset_provenance
+```
 
-Must contain:
+`source.path`、资产、公式、报告和 output override 都必须位于页面目录。页面构建应在同目录临时文件中完成并成功后原子发布，失败不得留下半成品。`slide`、`content_box` 和 `source.width_px/height_px` 来自 `page_request.json`。坐标都来自 `source.png`：`box_px: [x,y,w,h]`、`points_px: [x1,y1,x2,y2]`、`polygon_px` 和 `bezier_px` 使用源像素；`bezier_px` 为连续三次 Bézier 段。每个定位文本、图片和非线形状必须有 `box_px`；线必须有 `points_px`；Bézier 必须有 `box_px` 与段数据。
 
-- `schema_version: 2`
-- `slide`
-- `content_box`
-- `source`
-- `text_inventory`
-- `visual_inventory`
-- `background_strategy`
-- `quality_checks`
-- `quality_evidence`
-- `text_boxes`
-- `shapes`
-- `images`
-- `asset_provenance`
-- page strategy
+## 4. 视觉来源与编辑性
 
-All paths referenced by the manifest, including `source`, `images`, provenance
-sources, formula files, reports, and build overrides, must resolve inside the page
-directory. Page build output is staged in the same directory and published
-atomically; a failed build must not leave a new partial PPTX at the requested path.
-
-`slide`, `content_box`, and `source.width_px/source.height_px` must come from `page_request.json`. All `box_px`, `points_px`, and `polygon_px` values use `source.png` pixel coordinates; the runtime maps these coordinates into `content_box` instead of stretching them to the whole slide. Coordinate layouts:
-
-- `box_px: [x, y, width, height]`
-- `points_px: [x1, y1, x2, y2]`
-- `bezier_px`: one or more contiguous cubic segments, each encoded as
-  `[x1, y1, c1x, c1y, c2x, c2y, x2, y2]` in source pixels. Use
-  `type: "bezier"` plus `box_px` to create one editable PowerPoint freeform
-  curve; do not approximate a smooth chart curve with many straight shapes.
-
-Positioned build object requirements:
-
-- Every `text_boxes[]` item must have `box_px`. Text in `text_inventory` does not create a positioned text box.
-- Every `images[]` item must have `box_px`.
-- Every non-line `shapes[]` item must have `box_px`.
-- Every line shape must have `points_px`.
-- Every Bézier shape must have `box_px` and at least one valid `bezier_px`
-  segment. Consecutive segments should share endpoints so the rendered path has
-  continuous geometry.
-
-`text_inventory` and `visual_inventory` are only inventories; they do not substitute for positioned `text_boxes`, `images`, and `shapes`. The manifest must be sufficient to rebuild the page without reading any custom page script.
-
-In schema v2, every `visual_inventory` item is structured:
+新 `visual_inventory[]` 对每个视觉对象至少记录：
 
 ```json
 {
-  "id": "company-mark",
+  "id": "metric-icon",
   "kind": "foreground-asset",
-  "representation": "asset-sheet-separated",
-  "path": "assets/company-mark.png",
-  "description": "Source-faithful mark separated on the reviewed asset sheet"
+  "source_type": "svg-reconstructed",
+  "editability": "svg-image",
+  "path": "assets/metric-icon.svg",
+  "source_box_px": [120, 80, 48, 48],
+  "identity_evidence": "轮廓、比例、负空间和颜色依据源图复核",
+  "processing_method": "faithful-svg-reconstruction",
+  "reason": "扁平图标作为可移动 SVG 图片保留"
 }
 ```
 
-Allowed `kind` values are `background`, `foreground-asset`,
-`native-structure`, and `formula`. Allowed `representation` values are `native`,
-`asset-sheet-separated`, `source-preserving-local-cleanup`, `imagegen`, and
-`latex-rendered-formula`. Valid pairs are:
+`kind` 为兼容字段，允许 `background`、`foreground-asset`、`native-structure`、`formula`。新页的核心合同是 `source_type` 与 `editability`：
 
-- background: `native`, `source-preserving-local-cleanup`, or `imagegen`;
-- foreground-asset: `asset-sheet-separated` with a path and matching provenance;
-- native-structure: `native`;
-- formula: `latex-rendered-formula`.
+| `source_type` | 含义 | 合法 `editability` |
+| --- | --- | --- |
+| `native-object` | 由确定性构建器生成的原生文本/形状/表格/连接线 | `native-object` |
+| `svg-reconstructed` | 依据源稿重建的忠实扁平 SVG | `svg-image` |
+| `vector-traced` | 本地 VTracer 追踪源路径得到的 SVG | `svg-image` |
+| `source-extracted` | 源稿有边界局部的原始提取 | `raster-image` 或 `svg-image` |
+| `image-edited` | 显式选择的图像编辑/生成工具的输出 | `raster-image` |
+| `imagegen` | 历史图像工具输出，兼容读取 | `raster-image` |
+| `latex-rendered-formula` | 本地 LaTeX 渲染结果 | `svg-image` 或 `raster-image` |
+| `user-provided` | 用户已提供的外部局部资产 | 按实际为 `svg-image` 或 `raster-image` |
+| `user-approved-rasterization` | 用户明确批准的栅格化例外 | `raster-image` |
 
-Every structured formula item must match a `formula_inventory` entry by id or
-rendered image path; merely classifying a visual as a formula does not prove it was
-rendered or explicitly approved for omission.
+新页禁止用 `representation` 单字段表达编辑性；旧值可兼容映射：`native` → `native-object`，`asset-sheet-separated` → 依据 provenance 重新填写 `source_type` 与 `editability`。不确定时必须报告，而不是猜测为 native。
 
-These fields, rather than substring matches in prose, determine the object-source
-contract. This avoids false matches such as `benchmark` containing `mark`, and it
-prevents a foreground icon from being excused merely because its description also
-contains the word `background`.
+`svg-reconstructed`、`vector-traced` 和 `source-extracted` 必须有 `source_box_px`（或兼容的 `source_bbox_px`），表示源图中的真实局部边界。`svg-reconstructed` 与 `source-extracted` 还必须有非空 `identity_evidence`；`source-extracted` 必须有 `contamination_check: {"passed": true, "observation": "..."}`，说明邻近文字、边框或其他对象没有混入。`vector-traced` 的 `source` 必须是实际本地栅格输入（通常为 `source.png` 或页面内提取图），不能伪造为一个已经生成的 SVG。
 
-Missing coordinates are page-contract violations. The runtime must reject them during `image2ppt run record` and deck validation because otherwise missing values fall back to default positions such as the top-left corner.
+旧 manifest 的 `representation` 仍允许 `native`、`asset-sheet-separated`、`source-preserving-local-cleanup`、`imagegen`、`latex-rendered-formula`，以及迁移期间的 `svg-reconstructed`、`vector-traced`、`source-extracted`、`image-edited`。它只用于兼容读取；新页以结构化 `source_type`/`editability` 为准。新字段的合法组合为：`native-object`→`native-object`，`svg-reconstructed`/`vector-traced`→`svg-image`，`source-extracted`→`raster-image` 或 `svg-image`，`image-edited`→`raster-image`，公式按实际 SVG/栅格格式记录。
 
-Text-size fitting:
+`visual_inventory` 只盘点对象；真正定位对象仍写入 `text_boxes[]`、`shapes[]`、`images[]`。原生文字通常在 `text_inventory` 与 `text_boxes` 中记录，不需要伪造图片 provenance。
 
-- `text_boxes[].font_size` is the authored font size in points. The deterministic
-  builder preserves it during normalization when the manifest sets
-  `typography_policy: governed`; it never silently shrinks governed text to
-  hide overflow.
-- `text_boxes[].box_px` should describe the source text bounds plus modest
-  padding. Do not use an entire card, chart, table cell group, or unrelated
-  container as the text box, because the validator can only infer fit from the
-  box it receives.
-- When text is too long, introduce semantic line breaks, adjust the box or
-  layout, and only then consider applying a smaller size to the complete
-  same-level style/alignment group. Run page validation after rebuilding; an
-  estimated overflow is a contract failure.
-- Manifest v2 requires `typography_policy: governed`. In this mode `fit_text` does
-  not enable per-box shrinking; optional measurement fields such as
-  `min_font_size`, `max_font_size`, `text_fit_safety`, and `line_height` are
-  advisory inputs to the deterministic overflow estimate. A missing policy is
-  treated as legacy and retains the pre-existing builder fit behavior so old
-  manifests continue to migrate.
-- `governed` is the only accepted explicit policy value. A misspelled or other
-  value is a contract failure. Using `text_style_id` or `alignment_group`
-  without the governed policy is also a failure; omit all three fields only
-  when migrating a genuinely legacy manifest.
+## 5. `asset_provenance`
 
-Typography and alignment governance:
-
-- Optional `text_style_id` identifies one shared text style. Every text item
-  using the same id must keep the same font and font size; keep `line_height`
-  consistent for the same level as well. The validator reports drift.
-- Optional `alignment_group` names a shared source-pixel alignment rail, and
-  optional `role` distinguishes anchors such as `number`, `title`, and `body`.
-  Items with the same group and role must keep the same x anchor, font, and
-  font size. Use separate groups for distinct columns. Number-frame shapes
-  sharing a group and role must use matching shape geometry and dimensions.
-- These fields are optional so manifests created before this contract remain
-  compatible. See `references/typography-alignment-contract.md` for the
-  inventory, wrapping, and render-review workflow.
-
-Text alignment:
-
-- `text_boxes[].align` accepts `left`, `center`, or `right` (default `left`). The equivalent DrawingML tokens `l`, `ctr`, and `r` are also accepted.
-- `text_boxes[].valign` accepts `top`, `middle`, or `bottom` (default `top`); `center` is an alias for `middle`. The equivalent DrawingML tokens `t`, `ctr`, and `b` are also accepted.
-- The deterministic builder translates these manifest values to valid DrawingML enum tokens. Unsupported values are page-contract violations instead of silently falling back to an application default.
-
-`text_inventory` may be a list of strings or a list of structured objects. In structured objects, the fields used for exact text validation are `text`, `required_text`, `items`, or `texts`; fields such as `id`, `decision`, `description`, and `note` are only records and are not used for exact text matching. Example:
+每个 `images[].path` 都必须有一条匹配记录，且来源路径存在于页面目录：
 
 ```json
-[
-  {"id": "title", "text": "Market Overview", "decision": "native-text"},
-  {"id": "metrics", "required_text": ["Annual recurring revenue", "42.8M"]}
-]
+{
+  "path": "assets/photo.png",
+  "source": "source.png",
+  "source_type": "source-extracted",
+  "editability": "raster-image",
+  "source_box_px": [320, 210, 260, 180],
+  "identity_evidence": "照片主体和原稿局部构图逐项核对",
+  "contamination_check": {
+    "passed": true,
+    "observation": "提取框未包含相邻文字或卡片边框"
+  },
+  "processing_method": "bounded-source-extraction",
+  "reason": "仅保留复杂视觉的真实局部边界",
+  "producer": "local-extractor",
+  "model": null,
+  "transform": "bounded source-region extraction",
+  "provenance_note": "仅保留源稿中对应的照片局部"
+}
 ```
 
-`quality_checks` must include at least:
+图像编辑/生成时必须写实际 `producer`、精确 `model`（如有）、输入文件、提示或编辑意图、`transform: image-edit`、用户授权边界和失败/重试原因。`builtin-imagegen` 只能记录显式使用的宿主工具；`host-image-tool` 必须记录工具名/调用名；`external-import` 必须记录用户选定的本地源。禁止记录 key、OAuth 内容或机器私有路径。
+
+SVG 资产按内容检查：拒绝脚本、远程引用和仅改名的栅格内容；记录其可移动/可替换的 `svg-image` 编辑性。复杂视觉优先 `source-extracted`，图像编辑是受控例外。整页、整卡、整表和整图表不能作为局部资产。
+
+## 6. Typography、质量和区域证据
+
+新页必须有：
+
+```json
+"quality_checks": {
+  "font_size_calibrated": true,
+  "visual_inventory_matched": true,
+  "background_strategy_checked": true,
+  "shape_corner_geometry_checked": true
+}
+```
+
+每个检查对应 `quality_evidence`，`observation` 至少 12 个字符并指向实际 source/preview/render。`typography_policy: governed` 下，构建器不单独缩小文本来掩盖溢出；用语义换行、改框或整体同级字号修复。`text_style_id` 约束字体/字号/行高，`alignment_group` + `role` 约束源像素对齐轨道；number frame 与 number label 使用不同 role。
+
+结构页将 `image2ppt_region_decomposition` 放入同一 manifest。每个区域记录 `source_bbox_px`、strategy、风险、manifest ids 和 protected anchors；复合图记录节点中心/尺寸、边端点/方向/线型。该字段是 QA 证据，不是第二个 plan 或 controller。
+
+`text_inventory` 可以是字符串列表，也可以是结构化对象；用于精确文本校验的字段包括 `text`、`required_text`、`items` 和 `texts`，`id`、`decision`、`description`、`note` 只作记录。`text_boxes[].align` 接受 `left`、`center`、`right`（以及兼容 DrawingML 的 `l`、`ctr`、`r`）；`valign` 接受 `top`、`middle`、`bottom`（`center` 映射为 `middle`）。文本 inventory 不能替代 positioned `text_boxes`。
+
+每个新页的 `quality_checks` 至少包含以下四个为 `true` 的标志，并为每项提供具体 `quality_evidence.*.observation`（至少 12 个字符，可附 `artifact`）：
 
 ```json
 {
@@ -341,157 +211,94 @@ Text alignment:
 }
 ```
 
-Schema v2 also requires matching `quality_evidence`. Every required check has an
-object with a concrete `observation` of at least 12 characters and may identify the
-inspected `artifact`:
+例如：
 
 ```json
 {
   "font_size_calibrated": {
-    "observation": "Title and body levels match the source without clipping",
-    "artifact": "preview.png"
+    "observation": "标题和正文等级与源图一致且没有裁断",
+    "artifact": "render/rendered.png"
   },
   "visual_inventory_matched": {
-    "observation": "All five source visuals appear once in the reconstructed page"
+    "observation": "源图中的五个视觉对象各出现一次"
   },
   "background_strategy_checked": {
-    "observation": "Background geometry and palette remain aligned with source.png"
+    "observation": "背景构图、透视和颜色与源图保持一致"
   },
   "shape_corner_geometry_checked": {
-    "observation": "Card radii and straight table corners match the enlarged source"
+    "observation": "卡片半径和表格直角按放大源图复核"
   }
 }
 ```
 
-`background_strategy` must explain at least:
+`background_strategy` 至少说明 `mode`、`source_consistency_contract`、`removed_foreground` 和比较源图后的 `comparison_note`。`mode` 可为 `native-or-script`、`source-preserving-local-cleanup` 或明确的 image-edit clean base；它不能把整页源图伪装成可编辑背景。
 
-- `mode`: `native-or-script`, `source-preserving-local-cleanup`, `imagegen-full-clean-base`, or similar.
-- `source_consistency_contract`: which composition, perspective, object positions, colors, lighting, and key details are preserved.
-- `removed_foreground`: which foreground objects were removed from the background and rebuilt later.
-- `comparison_note`: the background consistency conclusion after comparing the preview against the source.
+所有 `roundRect` 必须记录 `source_corner_radius_px`，并可记录 `corner_category`（`straight`、`small-radius`、`large-radius`、`pill`）与 `corner_reason`；直角使用 `rect`。圆角是源对象属性，不按审美默认圆角。
 
-`asset_provenance` requirements — every path referenced in `images[]` must have a matching entry:
+`text_boxes[].box_px` 应是源文字边界加适度 padding，而不是整张卡、整张表或无关容器。`font_size` 是 authored points；governed 页面不允许 builder 静默缩小单个 box。`min_font_size`、`max_font_size`、`text_fit_safety`、`line_height` 等测量字段是辅助信息，不是逃避字号治理的开关。
 
-- `path`: the image path as referenced in `images[]`.
-- `source`: the file the asset was produced from (for separated assets and clean bases this is typically `source.png` or the recorded asset sheet; for formulas the `.tex` file). The referenced file must exist.
-- `source_type`: exactly one of `asset-sheet-separated`, `imagegen`, `latex-rendered-formula`, `user-provided`, `user-approved-rasterization`. No other value passes validation.
-- `provenance_note`: a non-empty explanation of how the asset was produced.
+## 7. 公式与箭头
 
-Legacy schema-v1 manifests use conservative free-text checks for backward
-compatibility. Schema-v2 manifests use the structured fields above and do not use
-substring classification. In legacy manifests:
+公式图片的 provenance 使用 `latex-rendered-formula`，必须来自 `formula render-latex`；缺少 engine、转换器或编译失败是硬失败，除非 `formula_inventory` 对该公式写入 `user_approved_exception: true` 和具体 `approval_note`。
 
-- An item whose description names a foreground object (icon, photo, logo, screenshot, badge, 图标, 照片, ...) must state its separation method in its text — include a term like "asset-sheet separated" / "image edit" / "分离" — unless the text marks it as background, formula, or native structure. Matching is substring-level, so words like "benchmark" or "trademark" also trigger the foreground check ("mark"); give native structural items an explicit "native structural" / "结构" marker in their description to exempt them.
-- Terms naming forbidden fallbacks — "crop", "approximation", "fallback", "emoji", "裁剪", "近似", "降级", and similar — fail validation wherever they appear in these texts, even inside negations such as "no crop". Describe what was done ("asset-sheet separated from source"), not what was avoided.
-
-`roundRect` shapes must record `source_corner_radius_px`; they may also record `corner_reason`. If the source is a straight-corner rectangle, use `rect`.
-
-Recommended record:
+一个完整的公式记录至少包含：
 
 ```json
 {
-  "type": "roundRect",
-  "box_px": [64, 169, 472, 187],
-  "source_corner_radius_px": 12,
-  "corner_category": "small-radius",
-  "corner_reason": "source card corners are lightly rounded"
+  "id": "formula_01",
+  "status": "rendered",
+  "editable": false,
+  "image": "assets/formula_01.svg",
+  "tex_source": "assets/formula_01.tex"
 }
 ```
 
-Allowed `corner_category` values: `straight`, `small-radius`, `large-radius`, `pill`. `straight` should not use `roundRect`.
+带有图片的公式条目还应将 `images[].path` 与 `.tex` 源文件、`asset_provenance.source_type: latex-rendered-formula` 和 `formula_inventory.image` 对齐；公式图片的视觉保真优先于方程对象编辑性。
 
-`latex-rendered-formula` formula assets must record:
-
-```json
-{
-  "images": [
-    {
-      "id": "formula_c2_1",
-      "path": "assets/formula_c2_1.svg",
-      "box_px": [105, 392, 390, 90],
-      "alt": "LaTeX rendered formula formula_c2_1",
-      "z_index": 220
-    }
-  ],
-  "asset_provenance": [
-    {
-      "path": "assets/formula_c2_1.svg",
-      "source": "assets/formula_c2_1.tex",
-      "source_type": "latex-rendered-formula",
-      "provenance_note": "Rendered from LaTeX by image2ppt formula render-latex; visual fidelity is prioritized over formula editability."
-    }
-  ],
-  "formula_inventory": [
-    {
-      "id": "formula_c2_1",
-      "decision": "latex-rendered-image",
-      "editable": false,
-      "image": "assets/formula_c2_1.svg",
-      "tex_source": "assets/formula_c2_1.tex"
-    }
-  ]
-}
-```
-
-Formula images must be generated by `image2ppt formula render-latex`. Do not use source-image formula snippets, and do not assemble complex formulas from hand-written native text boxes.
-
-Every `formula_inventory` item is a hard validation contract. A formula marked
-`failed`, `missing`, or `blocked`, or one without a rendered image/provenance pair,
-fails the page. The only exception is explicit approval from the user for that
-exact formula, recorded as:
+公式失败或用户批准例外的完整形状：
 
 ```json
 {
-  "id": "formula_c2_1",
+  "id": "formula_01",
   "status": "blocked",
   "user_approved_exception": true,
-  "approval_note": "User approved delivery without formula_c2_1 on 2026-08-18"
+  "approval_note": "用户明确批准省略 formula_01，并记录批准日期和原因"
 }
 ```
 
-An internal decision, generic warning, or `validation.json.passed=true` cannot
-create this exception.
+内部判断、普通 warning 或 `validation.json.passed=true` 都不能代替该具体批准。公式图片必须来自 `formula render-latex`，不能使用源图中的公式局部或大量手写文本框拼装。
 
-## `pages/page_NNN/imagegen-jobs.json`
+`images[]`、`asset_provenance[]` 和 `formula_inventory[]` 必须互相匹配。缺失、失败或仅有 free-text 的公式条目都不能关闭页面门禁；明确批准例外时仍须记录具体公式和批准说明。
 
-Owner: created by `image2ppt prepare`, updated by `image2ppt image import` and `image2ppt image process-sheet` (`generate`/`edit` do not write it — importing the selected output is what records the job).
+普通箭头的 `shapes[]` 必须是一条 line（原生端点箭头）或一个 filled-arrow AutoShape；箭头内文字写在同一 shape 的 `text` 字段。不要创建独立箭头头部、重复标签或整图替代。完整字段在 `manifest-arrow-extension.md`。
 
-Purpose: record the generation and processing process for clean bases, asset sheets, and selected bitmap assets.
+## 8. `imagegen-jobs.json`
 
-Each imported job records at least the selected output and the backend that actually produced it:
+`image import` 和 `image process-sheet` 记录页内资产处理；generate/edit 本身不写 ledger。新记录至少包含：
 
 ```json
 {
-  "schema_version": 1,
-  "jobs": [
-    {
-      "job_id": "icon-sheet",
-      "role": "asset_sheet",
-      "status": "recorded",
-      "source_image": "/absolute/path/from/tool-output.png",
-      "output": "assets/icon-sheet.png",
-      "output_sha256": "...",
-      "backend": "builtin-imagegen",
-      "model": null,
-      "fallback_reason": null
-    }
-  ]
+  "job_id": "asset-01",
+  "role": "source-extracted|asset|clean_base",
+  "status": "recorded",
+  "output": "assets/object.png",
+  "output_sha256": "...",
+  "backend": "local-only|host-image-tool|builtin-imagegen|external-import|openai-compatible-api|codex-oauth",
+  "model": null,
+  "fallback_reason": null
 }
 ```
 
-`backend` is the actual producer: `builtin-imagegen`, `codex-oauth`, or `openai-compatible-api`; `unknown` is reserved for legacy page directories that have no `image_backend` contract. `model` is the optional exact provider model id requested or reported for that output. `image2ppt image import` requires an explicit producer, rejects files that are not readable images, and checks `backend`/`fallback_reason` against the page contract. `fallback_reason` is `null` when the preferred backend succeeded or the run selected a CLI contract directly; when a built-in contract enters its CLI fallback, it records the matching event from `image_backend.fallback_policy.on`.
+`backend` 必须是真实 producer；没有静默 fallback。旧版 `asset-sheet-separated` 等 source type 只为历史页面保留，不能成为新页的泛化硬规则；历史 imagegen 输出仍保留，新页的 image-edit 过程使用 `image-edited` provenance。
 
-State and provenance record rules are described under "Preserve the single source
-of truth" in `SKILL.md` and in the asset processing examples in `cli-helper.md`.
+历史运行中的 ledger 可能还包含 `source_image`、`output_sha256`、`role` 和 `fallback_reason`。这些字段应继续保留并如实填写；`source_image` 可以是 import 时的外部输入记录，但 manifest build dependency 必须使用页面内 `output`。绝不通过扫描目录或文件时间推断实际结果。
 
-## `notes_manifest.json`
+## 9. 路径与迁移补充
 
-Owner: created by `image2ppt prepare`, read by `image2ppt run finalize`.
+页面拥有的 manifest、资产、公式、报告和 `--out` 覆盖都必须 resolve 到所属 page dir；绝对路径输入只允许在 `image import`/显式输入复制阶段使用。`..`、symlink escape 和跨页引用都是硬失败。run/final 产物必须在 prepared run 内，finalize 先写同目录临时文件，成功后原子发布。
 
-Purpose:
+`notes_manifest.json` 由 `prepare` 创建，由 `run finalize` 读取，保存原始 speaker-note XML/文本、页映射和 hashes。页面 worker 不翻译、摘要、重写或删除 notes。
 
-- Original PPT/PPTX speaker notes.
-- Notes hashes.
-- Page mapping.
+## 10. 备注与兼容
 
-Notes are not handed to page workers, translated, summarized, or rewritten.
+`prepare` 提取 PPT/PPTX speaker notes，页面 worker 不翻译、不重写、不删除。`run finalize` 是唯一装配阶段，并恢复源 notes 和 hashes。删除旧字段前先检查历史页面；任何迁移都不能创建第二个状态文件或第二条装配路径。

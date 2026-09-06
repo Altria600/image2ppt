@@ -44,7 +44,7 @@ class ProjectMetadataTests(unittest.TestCase):
         self.assertIn('href="README.md"', readme_en)
         for readme in (readme_cn, readme_en):
             self.assertIn('alt="Install"', readme)
-            self.assertIn("Claude%20Code%20%7C%20Codex", readme)
+            self.assertIn("Codex%20%7C%20WorkBuddy", readme)
             self.assertIn("https://github.com/Altria600/image2ppt", readme)
             self.assertIn("https://github.com/Paul-Jeo/Image2PPT", readme)
             self.assertIn("config.example.yaml", readme)

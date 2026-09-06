@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="468" viewBox="0 0 1280 468" role="img" aria-labelledby="title desc">
+  <title id="title">一页之内，选择合适的重建方式</title>
+  <desc id="desc">文字与结构用原生对象，扁平图标用 SVG，复杂视觉保留源素材或按需调用图像编辑。统一组装 PPTX 后做结构校验和实际渲染。</desc>
+  <rect width="1280" height="468" rx="16" fill="#F5F3EE"/>
+  <g font-family="Noto Sans CJK SC, Microsoft YaHei, PingFang SC, sans-serif">
+    <text x="44" y="59" font-size="29" font-weight="700" fill="#182C27">一页之内，选择合适的重建方式。</text>
+    <text x="44" y="91" font-size="16" fill="#65756A">先理解结构，再重建对象。同一页可以同时使用三种方式。</text>
+    <rect x="44" y="161" width="192" height="206" rx="8" fill="#FFF" stroke="#C7D3CA"/>
+    <text x="67" y="201" font-size="20" font-weight="700" fill="#263C33">原始页面</text>
+    <path d="M69 225H194M69 242H169" stroke="#ACBAB0" stroke-width="5"/>
+    <rect x="69" y="267" width="55" height="50" fill="#E4EEE6"/>
+    <rect x="139" y="267" width="55" height="50" fill="#F2E3D3"/>
+    <text x="69" y="343" font-size="13" fill="#65756A">识别区域与对象</text>
+    <path d="M237 264H291V185H339M291 264H339M291 264V345H339" fill="none" stroke="#9AAEA0" stroke-width="2"/>
+
+    <rect x="340" y="139" width="542" height="92" rx="8" fill="#E5EEE5"/>
+    <text x="365" y="174" font-size="20" font-weight="700" fill="#1D6653">文字、卡片与普通箭头</text>
+    <text x="365" y="207" font-size="15" fill="#52675A">原生文本框与形状 · 内容、位置与样式可修改</text>
+    <text x="810" y="179" font-size="14" fill="#1D6653">原生</text>
+
+    <rect x="340" y="246" width="542" height="78" rx="8" fill="#E8EDF1"/>
+    <text x="365" y="276" font-size="20" font-weight="700" fill="#35546C">扁平图标与可描摹轮廓</text>
+    <text x="365" y="304" font-size="15" fill="#526777">忠实 SVG / 本地 VTracer · 独立缩放与替换</text>
+    <text x="808" y="281" font-size="14" fill="#35546C">矢量</text>
+
+    <rect x="340" y="339" width="542" height="85" rx="8" fill="#F2E7DB"/>
+    <text x="365" y="371" font-size="20" font-weight="700" fill="#986344">3D、光影与复杂插画</text>
+    <text x="365" y="401" font-size="15" fill="#7F6D58">优先保留源素材 · 必要时使用已授权图像编辑</text>
+    <text x="810" y="376" font-size="14" fill="#986344">图像</text>
+    <path d="M883 185H931V283H982M883 284H982M883 383H931V283" fill="none" stroke="#9AAEA0" stroke-width="2"/>
+
+    <rect x="984" y="178" width="248" height="195" rx="8" fill="#1D6653"/>
+    <text x="1010" y="224" font-size="30" font-weight="700" fill="#FFF">PPTX</text>
+    <text x="1010" y="260" font-size="16" fill="#DDEBDF">统一组装 · 保留对象边界</text>
+    <path d="M1010 284H1206" stroke="#659380"/>
+    <text x="1010" y="316" font-size="16" fill="#FFF">结构校验 + 实际渲染</text>
+    <text x="1010" y="345" font-size="13" fill="#DDEBDF">对照源图，检查后交付</text>
+  </g>
+</svg>

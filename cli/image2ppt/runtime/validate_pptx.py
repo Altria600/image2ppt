@@ -15,6 +15,11 @@ from build_pptx_from_manifest import (
     normalize_manifest,
 )
 from deck_run_state import resolve_inside
+from object_routing import (
+    EDITABILITIES,
+    SOURCE_TYPES,
+    manifest_routing_violations,
+)
 
 
 NS = {
@@ -24,6 +29,11 @@ NS = {
 }
 
 ALLOWED_SOURCE_TYPES = {
+    "native-object",
+    "svg-reconstructed",
+    "vector-traced",
+    "source-extracted",
+    "image-edited",
     "asset-sheet-separated",
     "imagegen",
     "latex-rendered-formula",
@@ -43,10 +53,23 @@ VISUAL_REPRESENTATIONS = {
     "source-preserving-local-cleanup",
     "imagegen",
     "latex-rendered-formula",
+    # New manifests use source_type/editability.  These values are accepted
+    # in representation as a migration aid for fragments produced by older
+    # workers, but they never imply native PowerPoint path editability.
+    "svg-reconstructed",
+    "vector-traced",
+    "source-extracted",
+    "image-edited",
 }
 REPRESENTATIONS_BY_KIND = {
-    "background": {"native", "source-preserving-local-cleanup", "imagegen"},
-    "foreground-asset": {"asset-sheet-separated"},
+    "background": {"native", "source-preserving-local-cleanup", "imagegen", "image-edited"},
+    "foreground-asset": {
+        "asset-sheet-separated",
+        "svg-reconstructed",
+        "vector-traced",
+        "source-extracted",
+        "image-edited",
+    },
     "native-structure": {"native"},
     "formula": {"latex-rendered-formula"},
 }
@@ -185,24 +208,58 @@ def foreground_asset_contract_violations(manifest):
         field = f"visual_inventory[{index}]"
         kind = item.get("kind")
         representation = item.get("representation")
+        source_type = item.get("source_type")
+        editability = item.get("editability")
         structured = kind is not None or representation is not None or manifest_schema_version(manifest) >= 2
         if structured:
             if kind not in VISUAL_KINDS:
                 violations.append(
                     {"field": f"{field}.kind", "reason": f"kind must be one of {sorted(VISUAL_KINDS)}"}
                 )
-            if representation not in VISUAL_REPRESENTATIONS:
+            # v2 manifests written before mixed routing still use
+            # representation.  New records may instead use the explicit
+            # source_type/editability pair; requiring representation in that
+            # case would make valid migrated manifests fail.
+            if representation is None and source_type is None and editability is None:
+                violations.append(
+                    {
+                        "field": f"{field}.representation",
+                        "reason": "legacy structured visual items require representation, or use source_type plus editability",
+                    }
+                )
+            elif representation is not None and representation not in VISUAL_REPRESENTATIONS:
                 violations.append(
                     {
                         "field": f"{field}.representation",
                         "reason": f"representation must be one of {sorted(VISUAL_REPRESENTATIONS)}",
                     }
                 )
-            if kind in REPRESENTATIONS_BY_KIND and representation not in REPRESENTATIONS_BY_KIND[kind]:
+            if kind in REPRESENTATIONS_BY_KIND and representation is not None and representation not in REPRESENTATIONS_BY_KIND[kind]:
                 violations.append(
                     {
                         "field": f"{field}.representation",
                         "reason": f"{kind} requires one of {sorted(REPRESENTATIONS_BY_KIND[kind])}",
+                    }
+                )
+            if source_type is not None and source_type not in SOURCE_TYPES:
+                violations.append(
+                    {
+                        "field": f"{field}.source_type",
+                        "reason": f"source_type must be one of {sorted(SOURCE_TYPES)}",
+                    }
+                )
+            if editability is not None and editability not in EDITABILITIES:
+                violations.append(
+                    {
+                        "field": f"{field}.editability",
+                        "reason": f"editability must be one of {sorted(EDITABILITIES)}",
+                    }
+                )
+            if source_type == "native-object" and kind not in {"native-structure", "background"}:
+                violations.append(
+                    {
+                        "field": f"{field}.source_type",
+                        "reason": "native-object routing is reserved for text/structure, not a foreground asset",
                     }
                 )
             path = visual_item_path(item)
@@ -213,14 +270,24 @@ def foreground_asset_contract_violations(manifest):
                     violations.append(
                         {"field": field, "reason": "foreground-asset requires a path to its separated asset"}
                     )
-                else:
+                elif source_type is None:
                     provenance = provenance_by_path.get(path, {})
-                    if provenance.get("source_type") != "asset-sheet-separated":
+                    expected_source = (
+                        representation
+                        if representation in {
+                            "svg-reconstructed",
+                            "vector-traced",
+                            "source-extracted",
+                            "image-edited",
+                        }
+                        else "asset-sheet-separated"
+                    )
+                    if provenance.get("source_type") != expected_source:
                         violations.append(
                             {
                                 "field": field,
                                 "path": path,
-                                "reason": "foreground-asset provenance must use source_type asset-sheet-separated",
+                                "reason": f"foreground-asset provenance must use source_type {expected_source}",
                             }
                         )
             continue
@@ -299,7 +366,78 @@ def is_full_slide_image(item, slide):
     )
 
 
-def page_contract_violations(manifest):
+def _background_cleanup_evidence(manifest):
+    """Return whether a full-slide image is an evidenced clean base."""
+
+    strategy = manifest.get("background_strategy")
+    if not isinstance(strategy, dict):
+        return False
+    removed = strategy.get("removed_foreground")
+    comparison = strategy.get("comparison_note")
+    consistency = strategy.get("source_consistency_contract")
+    return (
+        isinstance(removed, list)
+        and bool(removed)
+        and isinstance(comparison, str)
+        and bool(comparison.strip())
+        and isinstance(consistency, str)
+        and bool(consistency.strip())
+    )
+
+
+def _same_page_source_pixels(manifest, asset_path, manifest_base):
+    """Detect a renamed copy of the page source used as a clean base.
+
+    Only the manifest's page source is compared.  A provenance ``source`` may
+    point at an intentionally selected local reference asset and must not make
+    an otherwise bounded/clean asset fail this guard.
+    """
+
+    if manifest_base is None:
+        return False
+    source = manifest.get("source")
+    source_ref = (source.get("path") if isinstance(source, dict) else None) or "source.png"
+    try:
+        asset = resolve_inside(manifest_base, asset_path)
+        original = resolve_inside(manifest_base, source_ref)
+    except (TypeError, ValueError):
+        return False
+    if not asset.is_file() or not original.is_file():
+        return False
+    try:
+        if hashlib.sha256(asset.read_bytes()).digest() == hashlib.sha256(original.read_bytes()).digest():
+            return True
+        from PIL import Image, ImageChops
+
+        with Image.open(asset) as asset_image, Image.open(original) as original_image:
+            if asset_image.size != original_image.size:
+                return False
+            asset_rgb = asset_image.convert("RGB")
+            original_rgb = original_image.convert("RGB")
+            try:
+                return ImageChops.difference(asset_rgb, original_rgb).getbbox() is None
+            finally:
+                asset_rgb.close()
+                original_rgb.close()
+    except (OSError, ValueError):
+        return False
+
+
+def _is_evidenced_clean_base(manifest, image_path, source_type):
+    if source_type not in {"image-edited", "imagegen"}:
+        return False
+    if not _background_cleanup_evidence(manifest):
+        return False
+    path = Path(image_path).as_posix()
+    return any(
+        isinstance(item, dict)
+        and item.get("kind") == "background"
+        and visual_item_path(item) == path
+        for item in manifest.get("visual_inventory", [])
+    )
+
+
+def page_contract_violations(manifest, manifest_base=None):
     violations = []
     slide = manifest.get("slide", {})
     images = manifest.get("images", [])
@@ -321,6 +459,26 @@ def page_contract_violations(manifest):
                     "reason": "full-slide source.png background with editable text overlays causes baked-text overlap",
                 }
             )
+        if is_full_slide_image(image, slide):
+            clean_base = _is_evidenced_clean_base(manifest, path, source_type)
+            if source_type in {"source-extracted", "vector-traced", "asset-sheet-separated"} or (
+                source_type in {"image-edited", "imagegen"} and not clean_base
+            ):
+                violations.append(
+                    {
+                        "field": "images",
+                        "path": path,
+                        "reason": "an asset route cannot bypass reconstruction with a full-slide image; only an evidenced background clean base is allowed",
+                    }
+                )
+            elif clean_base and _same_page_source_pixels(manifest, path, manifest_base):
+                violations.append(
+                    {
+                        "field": "images",
+                        "path": path,
+                        "reason": "background clean base is an unchanged copy of page source.png",
+                    }
+                )
         if (
             is_full_slide_image(image, slide)
             and source_type in {"user-provided", "user-approved-rasterization"}
@@ -608,7 +766,7 @@ def style_alignment_contract_violations(manifest, normalized_manifest=None):
     return violations
 
 
-def quality_contract_violations(manifest, normalized_manifest=None):
+def quality_contract_violations(manifest, normalized_manifest=None, manifest_base=None):
     violations = []
 
     if "visual_inventory" not in manifest:
@@ -703,6 +861,7 @@ def quality_contract_violations(manifest, normalized_manifest=None):
     violations.extend(foreground_asset_contract_violations(manifest))
     violations.extend(style_alignment_contract_violations(manifest, normalized_manifest))
     violations.extend(formula_contract_violations(manifest))
+    violations.extend(manifest_routing_violations(manifest, manifest_base=manifest_base))
     return violations
 
 
@@ -971,8 +1130,12 @@ def validate_deck(args):
                 normalized_manifest, authoring_violations = normalize_for_validation(raw_manifest)
                 violations = (
                     authoring_violations
-                    + page_contract_violations(normalized_manifest)
-                    + quality_contract_violations(raw_manifest, normalized_manifest)
+                    + page_contract_violations(normalized_manifest, manifest_base=manifest_path.parent)
+                    + quality_contract_violations(
+                        raw_manifest,
+                        normalized_manifest,
+                        manifest_base=manifest_path.parent,
+                    )
                 )
                 if violations:
                     report["page_contract_violations"].append(
@@ -1131,6 +1294,7 @@ def main():
         "asset_provenance_checked": 0,
         "manifest_image_count": len(manifest.get("images", [])),
         "media_manifest_mismatch": False,
+        "unexpected_media_parts": [],
         "relationship_targets_checked": 0,
         "warnings": [],
         "page_contract_violations": [],
@@ -1154,8 +1318,9 @@ def main():
                     report["missing_parts"].append(part)
             slide_names = sorted(n for n in names if re.match(r"ppt/slides/slide\d+\.xml$", n))
             report["slides"] = len(slide_names)
-            report["images"] = len([n for n in names if n.startswith("ppt/media/")])
-            report["media_manifest_mismatch"] = report["images"] != report["manifest_image_count"]
+            media_names = sorted(n for n in names if n.startswith("ppt/media/"))
+            report["images"] = len(media_names)
+            expected_media_names = set()
             for index, image in enumerate(manifest.get("images", []), start=1):
                 image_path = image.get("path")
                 if not image_path:
@@ -1164,6 +1329,13 @@ def main():
                 if ext == ".jpeg":
                     ext = ".jpg"
                 media_name = f"ppt/media/image{index}{ext}"
+                expected_media_names.add(media_name)
+                if ext == ".svg":
+                    # The SVG is the fidelity-preserving relationship.  The
+                    # deterministic builder also packages a PNG fallback for
+                    # older renderers; it is valid only at this matching media
+                    # index, never as an arbitrary extra part.
+                    expected_media_names.add(f"ppt/media/image{index}.png")
                 source_path = Path(image_path)
                 try:
                     source_path = resolve_inside(manifest_base, source_path)
@@ -1175,6 +1347,24 @@ def main():
                         {"path": image_path, "media": media_name, "reason": "missing media part"}
                     )
                     continue
+                if ext == ".svg" and f"ppt/media/image{index}.png" not in names:
+                    report["media_hash_mismatches"].append(
+                        {
+                            "path": image_path,
+                            "media": f"ppt/media/image{index}.png",
+                            "reason": "missing SVG PNG fallback media part",
+                        }
+                    )
+                elif ext == ".svg":
+                    fallback_name = f"ppt/media/image{index}.png"
+                    if not z.read(fallback_name).startswith(b"\x89PNG\r\n\x1a\n"):
+                        report["media_hash_mismatches"].append(
+                            {
+                                "path": image_path,
+                                "media": fallback_name,
+                                "reason": "SVG fallback media is not a valid PNG",
+                            }
+                        )
                 if source_path.exists():
                     manifest_hash = file_sha256(source_path)
                     media_hash = hashlib.sha256(z.read(media_name)).hexdigest()
@@ -1184,6 +1374,14 @@ def main():
                         )
                 else:
                     report["missing_manifest_images"].append(str(image_path))
+            report["unexpected_media_parts"] = sorted(set(media_names) - expected_media_names)
+            report["media_manifest_mismatch"] = bool(
+                report["unexpected_media_parts"]
+                or any(
+                    expected not in names
+                    for expected in expected_media_names
+                )
+            )
             for slide_name in slide_names:
                 rels_name = f"{posixpath.dirname(slide_name)}/_rels/{posixpath.basename(slide_name)}.rels"
                 if rels_name not in names:
@@ -1243,10 +1441,50 @@ def main():
             continue
         report["asset_provenance_checked"] += 1
         source_type = entry.get("source_type")
+        editability = entry.get("editability")
         provenance_note = entry.get("provenance_note")
         if source_type not in ALLOWED_SOURCE_TYPES:
             report["invalid_asset_provenance"].append(
                 {"path": key, "field": "source_type", "value": source_type}
+            )
+        if editability is not None and editability not in EDITABILITIES:
+            report["invalid_asset_provenance"].append(
+                {"path": key, "field": "editability", "value": editability}
+            )
+        if source_type in {
+            "native-object",
+            "svg-reconstructed",
+            "vector-traced",
+            "source-extracted",
+            "image-edited",
+        } and editability is None:
+            report["invalid_asset_provenance"].append(
+                {
+                    "path": key,
+                    "field": "editability",
+                    "value": editability,
+                    "reason": "new source types must record actual editability separately",
+                }
+            )
+        expected_editability = {
+            "native-object": {"native-object"},
+            "svg-reconstructed": {"svg-image"},
+            "vector-traced": {"svg-image"},
+            "source-extracted": {"raster-image", "svg-image"},
+            "image-edited": {"raster-image"},
+        }.get(source_type)
+        if expected_editability and editability is not None and editability not in expected_editability:
+            report["invalid_asset_provenance"].append(
+                {
+                    "path": key,
+                    "field": "editability",
+                    "value": editability,
+                    "reason": f"source_type {source_type!r} requires one of {sorted(expected_editability)}",
+                }
+            )
+        if source_type == "native-object":
+            report["invalid_asset_provenance"].append(
+                {"path": key, "field": "source_type", "value": source_type, "reason": "images cannot use native-object provenance"}
             )
         if not provenance_note:
             report["invalid_asset_provenance"].append(
@@ -1271,8 +1509,8 @@ def main():
             report["missing_provenance_sources"].append({"path": key, "source": str(source)})
     report["page_contract_violations"] = (
         authoring_violations
-        + page_contract_violations(manifest)
-        + quality_contract_violations(raw_manifest, manifest)
+        + page_contract_violations(manifest, manifest_base=manifest_base)
+        + quality_contract_violations(raw_manifest, manifest, manifest_base=manifest_base)
     )
 
     report["passed"] = (
