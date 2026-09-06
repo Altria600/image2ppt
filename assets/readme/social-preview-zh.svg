@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Image2PPT：图片转可编辑 PPT</title>
+  <desc id="desc">截图里的内容，重新可编辑。文字能改，图形能动，素材能换。开源、本地优先，面向 Codex 和 WorkBuddy。图中为对象重建原理示意。</desc>
+  <rect width="1280" height="640" fill="#F5F3EE"/>
+  <g font-family="Noto Sans CJK SC, Microsoft YaHei, PingFang SC, sans-serif">
+    <rect x="64" y="54" width="40" height="40" rx="9" fill="#1D6653"/>
+    <path d="M76 66H92V76H82V85" fill="none" stroke="#FFFFFF" stroke-width="4"/>
+    <text x="121" y="84" font-size="30" font-weight="750" fill="#182C27">Image2PPT</text>
+    <text x="64" y="173" font-size="22" letter-spacing="2" fill="#617267">图片 / 扫描 PDF → 可编辑 PPTX</text>
+    <text x="59" y="277" font-size="76" font-weight="800" fill="#182C27">截图里的内容，</text>
+    <text x="59" y="379" font-size="76" font-weight="800" fill="#1D6653">重新可编辑。</text>
+    <text x="64" y="449" font-size="28" fill="#53665A">文字能改 · 图形能动 · 素材能换</text>
+    <path d="M64 501H694" stroke="#D3DBD1" stroke-width="2"/>
+    <text x="64" y="552" font-size="25" fill="#182C27">开源 · 本地优先</text>
+    <text x="298" y="552" font-size="25" fill="#53665A">Codex / WorkBuddy</text>
+
+    <rect x="793" y="83" width="395" height="196" rx="12" fill="#E5EBE3" stroke="#C4D1C5"/>
+    <text x="822" y="129" font-size="21" font-weight="700" fill="#65766A">一张图片</text>
+    <path d="M824 159H1074M824 183H997" stroke="#ACBBAE" stroke-width="7"/>
+    <rect x="824" y="210" width="86" height="42" rx="3" fill="#CBD9CA"/>
+    <rect x="925" y="210" width="86" height="42" rx="3" fill="#CBD9CA"/>
+    <rect x="1026" y="210" width="126" height="42" rx="3" fill="#D4DECC"/>
+    <path d="M990 290V321M980 311L990 321L1000 311" fill="none" stroke="#1D6653" stroke-width="3"/>
+
+    <rect x="793" y="337" width="395" height="225" rx="12" fill="#FFFFFF" stroke="#BACBBB"/>
+    <rect x="819" y="367" width="237" height="48" fill="#F0F7F0" stroke="#1D6653" stroke-width="2"/>
+    <text x="835" y="400" font-size="26" font-weight="700" fill="#1D6653">可编辑的内容</text>
+    <g fill="#FFFFFF" stroke="#1D6653" stroke-width="2">
+      <rect x="815" y="363" width="8" height="8"/><rect x="1052" y="363" width="8" height="8"/>
+      <rect x="815" y="411" width="8" height="8"/><rect x="1052" y="411" width="8" height="8"/>
+    </g>
+    <path d="M827 461H1029M1015 451L1029 461L1015 471" fill="none" stroke="#1D6653" stroke-width="5"/>
+    <circle cx="827" cy="461" r="6" fill="#FFFFFF" stroke="#1D6653" stroke-width="2"/>
+    <rect x="1081" y="443" width="68" height="68" rx="6" fill="#F3E6D9"/>
+    <circle cx="1115" cy="477" r="19" fill="#D57550"/>
+    <text x="823" y="531" font-size="18" fill="#65766A">原生对象 + SVG + 独立素材</text>
+    <text x="795" y="598" font-size="14" fill="#7F8B80">对象重建示意 / github.com/Altria600/image2ppt</text>
+  </g>
+</svg>
